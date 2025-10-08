@@ -91,3 +91,51 @@ tr.member-row:hover {
 .drop-zone.drag-over {
     @apply bg-primary/10 border-primary;
 }
+
+/* Date and time input styles */
+input[type="date"],
+input[type="time"] {
+    position: relative;
+    background: var(--background);
+    color: var(--foreground);
+    width: 100%;
+}
+
+/* Ensure date/time picker icons are visible and clickable */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 1;
+    filter: invert(var(--tw-invert, 0));
+}
+
+/* Firefox support */
+input[type="date"]::-moz-focus-inner,
+input[type="time"]::-moz-focus-inner {
+    border: 0;
+    padding: 0;
+}
+
+/* Channel autocomplete styles */
+.channel-autocomplete-container {
+    position: relative;
+}
+
+.channel-suggestions {
+    @apply bg-background border border-border rounded-md shadow-lg;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 50;
+}
+
+.channel-suggestion-item {
+    @apply p-2 hover:bg-accent cursor-pointer transition-colors;
+}
+
+.channel-suggestion-item:hover {
+    @apply bg-accent text-accent-foreground;
+}
+
+.channel-suggestions .border-b {
+    @apply border-border;
+}

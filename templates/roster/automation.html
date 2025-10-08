@@ -1,0 +1,299 @@
+<!-- Automation Management Tab -->
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h3 class="text-lg font-semibold text-foreground">Automation Settings</h3>
+            <p class="text-sm text-muted-foreground">Configure automated actions for this roster</p>
+        </div>
+        <div class="flex items-center gap-2">
+            <button onclick="testAutomation()" id="test-automation-btn"
+                    class="px-3 py-2 bg-secondary hover:bg-secondary/80 text-sm rounded-md transition-colors flex items-center gap-2"
+                    style="display: none;" title="Test current automation">
+                <i data-lucide="play" class="w-4 h-4"></i>
+                <span>Test</span>
+            </button>
+            <button onclick="toggleAutomation()" id="automation-toggle-btn"
+                    class="px-3 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm rounded-md transition-colors flex items-center gap-2">
+                <i data-lucide="plus" class="w-4 h-4"></i>
+                <span>Create Automation</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Event Timing Section -->
+    <div class="bg-card border border-border rounded-lg p-6">
+        <div class="flex items-center justify-between mb-4">
+            <div>
+                <h4 class="text-lg font-medium text-foreground mb-1" id="event-timing-title">Event Timing</h4>
+                <p class="text-sm text-muted-foreground" id="event-timing-subtitle">Set the start time for this roster's event</p>
+            </div>
+            <button onclick="toggleEventTimeEditor()" id="edit-event-time-btn"
+                    class="px-3 py-2 bg-secondary hover:bg-secondary/80 text-sm rounded-md transition-colors flex items-center gap-2">
+                <i data-lucide="edit" class="w-4 h-4"></i>
+                <span>Edit Time</span>
+            </button>
+        </div>
+
+        <!-- Current Event Time Display -->
+        <div id="event-time-display" class="mb-4">
+            <div class="flex items-center gap-3 p-4 bg-background rounded-lg">
+                <div class="w-2 h-2 rounded-full" id="event-status-indicator"></div>
+                <div class="flex-1">
+                    <div class="font-medium text-foreground" id="current-event-time">
+                        Not set
+                    </div>
+                    <div class="text-xs text-muted-foreground" id="current-event-timezone">
+                        Select a date and time below
+                    </div>
+                </div>
+                <div id="event-type-badge" class="hidden px-2 py-1 text-xs rounded-full">
+                    <!-- Badge will be populated by JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Event Time Editor -->
+        <div id="event-time-editor" class="space-y-4" style="display: none;">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="space-y-2">
+                    <label class="text-sm font-medium">Event Date</label>
+                    <input type="date" id="automation-event-date"
+                           class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent">
+                </div>
+                <div class="space-y-2">
+                    <label class="text-sm font-medium">Event Time</label>
+                    <input type="time" id="automation-event-time"
+                           class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent">
+                </div>
+            </div>
+            <div class="text-xs text-muted-foreground">
+                <span id="automation-timezone-info">Your local time</span> - This will be automatically converted and stored as UTC
+            </div>
+            <div class="flex gap-3">
+                <button onclick="saveEventTime()" class="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-md text-sm font-medium">
+                    Save Time
+                </button>
+                <button onclick="cancelEventTimeEdit()" class="px-4 py-2 bg-secondary hover:bg-secondary/80 text-sm rounded-md">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Automation Toggle -->
+    <div id="automation-toggle-section" class="flex items-center justify-between p-6 bg-card border border-border rounded-lg">
+        <div>
+            <h4 class="text-lg font-medium text-foreground mb-1">Automation</h4>
+            <p class="text-sm text-muted-foreground">Enable automated actions for this roster</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span class="text-sm text-muted-foreground">Disabled</span>
+            <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="automation-master-toggle" class="sr-only peer" onchange="toggleAutomationForm()">
+                <div class="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+            </label>
+            <span class="text-sm text-muted-foreground">Enabled</span>
+        </div>
+    </div>
+
+    <!-- Status Card (for when automation exists) -->
+    <div id="automation-status-card" class="bg-card border border-border rounded-lg p-6" style="display: none;">
+        <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-3">
+                <div id="automation-status-indicator" class="w-2 h-2 rounded-full bg-green-500"></div>
+                <div>
+                    <h4 id="automation-type-text" class="font-medium text-foreground">Event Lifecycle</h4>
+                    <p id="automation-schedule-text" class="text-sm text-muted-foreground">Daily at 10:00 AM</p>
+                </div>
+            </div>
+            <button onclick="deleteAutomation()" class="p-2 hover:bg-accent rounded text-red-400 hover:text-red-300" title="Delete automation">
+                <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+        </div>
+        <p id="automation-description" class="text-sm text-muted-foreground mb-4">Automatically manages the complete lifecycle of roster events</p>
+        <div class="text-xs text-muted-foreground">
+            Next execution: <span id="next-execution-time">in 2 hours</span>
+        </div>
+    </div>
+
+    <!-- Automation Setup Form -->
+    <div id="automation-form-container" class="bg-card border border-border rounded-lg p-6" style="display: none;">
+        <div class="flex items-center justify-between mb-6">
+            <h4 class="text-lg font-medium text-foreground">Automation Setup</h4>
+            <button onclick="cancelAutomation()" class="p-2 hover:bg-accent rounded text-muted-foreground hover:text-foreground">
+                <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+        </div>
+
+        <form id="automation-form" class="space-y-6">
+                <!-- Recurring Configuration -->
+                <div class="space-y-4">
+                    <h5 class="text-sm font-medium text-foreground">Event Type</h5>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <label class="flex items-center p-3 border border-input rounded-lg cursor-pointer hover:bg-accent/50">
+                            <input type="radio" name="event_type" value="one_time" class="mr-3" onchange="toggleRecurringOptions()" checked>
+                            <div>
+                                <div class="text-sm font-medium">One-time Event</div>
+                                <div class="text-xs text-muted-foreground">Single occurrence</div>
+                            </div>
+                        </label>
+                        <label class="flex items-center p-3 border border-input rounded-lg cursor-pointer hover:bg-accent/50">
+                            <input type="radio" name="event_type" value="recurring" class="mr-3" onchange="toggleRecurringOptions()">
+                            <div>
+                                <div class="text-sm font-medium">Recurring Event</div>
+                                <div class="text-xs text-muted-foreground">Repeats automatically</div>
+                            </div>
+                        </label>
+                    </div>
+
+                    <!-- Recurring Options -->
+                    <div id="recurring-options" class="bg-muted/20 rounded-lg p-4" style="display: none;">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-xs font-medium text-muted-foreground mb-1">Repeat every:</label>
+                                <input type="number" name="recurring_interval" min="1" value="7" class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-muted-foreground mb-1">Unit:</label>
+                                <select name="recurring_unit" class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm">
+                                    <option value="days">Days</option>
+                                    <option value="weeks">Weeks</option>
+                                    <option value="months">Months</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-muted-foreground mb-1">Clear members each cycle:</label>
+                                <select name="clear_members" class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm">
+                                    <option value="false">No - Keep members</option>
+                                    <option value="true">Yes - Clear members</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="text-xs text-muted-foreground mt-3">
+                            ⏰ The roster's event time (roster.time field) will be automatically updated for each recurring cycle
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Main Actions -->
+                <div class="space-y-4">
+                    <h5 class="text-sm font-medium text-foreground">Main Actions</h5>
+                    <div class="text-xs text-muted-foreground mb-3">⏰ All times are relative to the roster's event start time (roster.time field)</div>
+
+                    <div class="space-y-4">
+                        <!-- Post Signup -->
+                        <div class="p-4 bg-background rounded-lg">
+                            <div class="flex items-center gap-3 mb-3">
+                                <input type="checkbox" name="action_signup_enabled" checked class="w-4 h-4">
+                                <span class="text-xl">📅</span>
+                                <div>
+                                    <div class="font-medium">Post Signup</div>
+                                    <div class="text-xs text-muted-foreground">Open registrations</div>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 ml-7">
+                                <div class="relative">
+                                    <label class="block text-xs font-medium text-muted-foreground mb-1">Discord Channel</label>
+                                    <div class="channel-autocomplete-container">
+                                        <input type="text" name="action_signup_channel" placeholder="#announcements"
+                                               class="w-full px-3 py-2 bg-muted border border-input rounded-md text-sm channel-input"
+                                               oninput="handleChannelInput(this)" onfocus="showChannelSuggestions(this)">
+                                        <div class="channel-suggestions absolute z-10 w-full mt-1 bg-background border border-border rounded-md shadow-lg hidden max-h-48 overflow-y-auto">
+                                            <!-- Suggestions will be populated here -->
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-muted-foreground mb-1">Days before event</label>
+                                    <input type="number" name="action_signup_days" value="14" min="0" class="w-full px-3 py-2 bg-muted border border-input rounded-md text-sm">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Close Signup -->
+                        <div class="p-4 bg-background rounded-lg">
+                            <div class="flex items-center gap-3 mb-3">
+                                <input type="checkbox" name="action_close_enabled" checked class="w-4 h-4">
+                                <span class="text-xl">🚫</span>
+                                <div>
+                                    <div class="font-medium">Close Signup</div>
+                                    <div class="text-xs text-muted-foreground">Stop registrations</div>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 ml-7">
+                                <div class="relative">
+                                    <label class="block text-xs font-medium text-muted-foreground mb-1">Discord Channel</label>
+                                    <div class="channel-autocomplete-container">
+                                        <input type="text" name="action_close_channel" placeholder="#announcements"
+                                               class="w-full px-3 py-2 bg-muted border border-input rounded-md text-sm channel-input"
+                                               oninput="handleChannelInput(this)" onfocus="showChannelSuggestions(this)">
+                                        <div class="channel-suggestions absolute z-10 w-full mt-1 bg-background border border-border rounded-md shadow-lg hidden max-h-48 overflow-y-auto">
+                                            <!-- Suggestions will be populated here -->
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-muted-foreground mb-1">Days before event</label>
+                                    <input type="number" name="action_close_days" value="3" min="0" class="w-full px-3 py-2 bg-muted border border-input rounded-md text-sm">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Post Final List -->
+                        <div class="p-4 bg-background rounded-lg">
+                            <div class="flex items-center gap-3 mb-3">
+                                <input type="checkbox" name="action_final_enabled" checked class="w-4 h-4">
+                                <span class="text-xl">📋</span>
+                                <div>
+                                    <div class="font-medium">Post Final List</div>
+                                    <div class="text-xs text-muted-foreground">Publish final roster</div>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 ml-7">
+                                <div class="relative">
+                                    <label class="block text-xs font-medium text-muted-foreground mb-1">Discord Channel</label>
+                                    <div class="channel-autocomplete-container">
+                                        <input type="text" name="action_final_channel" placeholder="#announcements"
+                                               class="w-full px-3 py-2 bg-muted border border-input rounded-md text-sm channel-input"
+                                               oninput="handleChannelInput(this)" onfocus="showChannelSuggestions(this)">
+                                        <div class="channel-suggestions absolute z-10 w-full mt-1 bg-background border border-border rounded-md shadow-lg hidden max-h-48 overflow-y-auto">
+                                            <!-- Suggestions will be populated here -->
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-muted-foreground mb-1">Days before event</label>
+                                    <input type="number" name="action_final_days" value="2" min="0" class="w-full px-3 py-2 bg-muted border border-input rounded-md text-sm">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Reminders -->
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between">
+                        <h5 class="text-sm font-medium text-foreground">Reminders (Optional)</h5>
+                        <button type="button" onclick="addReminder()" class="px-3 py-1 bg-secondary hover:bg-secondary/80 text-sm rounded-md transition-colors flex items-center gap-2">
+                            <i data-lucide="plus" class="w-3 h-3"></i>
+                            <span>Add Reminder</span>
+                        </button>
+                    </div>
+                    <div id="reminders-list" class="space-y-3">
+                        <!-- Reminders will be added here dynamically -->
+                    </div>
+                </div>
+
+                <!-- Form Actions -->
+                <div class="flex gap-3 pt-4">
+                    <button type="button" onclick="saveAutomation()" class="px-6 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md font-medium">
+                        Save Automation
+                    </button>
+                    <button type="button" onclick="cancelAutomation()" class="px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md">
+                        Cancel
+                    </button>
+                </div>
+        </form>
+    </div>
+</div>

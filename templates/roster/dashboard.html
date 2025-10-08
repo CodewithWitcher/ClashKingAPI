@@ -64,17 +64,6 @@
 
                     <!-- Roster Tabs -->
                     <div id="roster-tabs" {{ 'style=display:none;' if not current_roster else '' }}>
-                        <!-- Tab Navigation -->
-                        <div class="bg-card rounded-t-lg border-x border-t border-border">
-                            <nav class="flex">
-                                <button id="tab-settings" onclick="showTab('settings')" class="px-4 py-3 text-sm font-medium rounded-tl-lg transition-colors tab-active">
-                                    Settings
-                                </button>
-                                <button id="tab-members" onclick="showTab('members')" class="px-4 py-3 text-sm font-medium transition-colors tab-inactive">
-                                    Members
-                                </button>
-                            </nav>
-                        </div>
 
                         <!-- Tab Content -->
                         <div class="bg-card rounded-b-lg border border-border">
@@ -96,6 +85,11 @@
                             <!-- Categories Tab -->
                             <div id="content-categories" class="tab-content p-6 hidden">
                                 {% include 'roster/categories.html' %}
+                            </div>
+
+                            <!-- Automation Tab -->
+                            <div id="content-automation" class="tab-content p-6 hidden">
+                                {% include 'roster/automation.html' %}
                             </div>
                         </div>
                     </div>
@@ -174,6 +168,7 @@
     <script src="/static/roster/settings.js?v={{ timestamp }}"></script>
     <script src="/static/roster/roster-utils.js?v={{ timestamp }}"></script>
     <script src="/static/roster/groups-categories.js?v={{ timestamp }}"></script>
+    <script src="/static/roster/automation.js?v={{ timestamp }}"></script>
     <script src="/static/roster/main.js?v={{ timestamp }}"></script>
 
     <script>

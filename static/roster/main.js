@@ -80,6 +80,20 @@ function showTab(tabName) {
             loadMembersDisplay(); // Load members display for drag & drop interface
         }, 100);
     }
+    
+    // If switching to automation tab, initialize automation settings
+    if (tabName === 'automation' && currentRosterData) {
+        console.log('Switching to automation tab, initializing automation...');
+        setTimeout(() => {
+            if (typeof initializeAutomationTab === 'function') {
+                initializeAutomationTab();
+            } else {
+                console.error('initializeAutomationTab function not found - automation.js may not be loaded');
+                showNotification('Automation module failed to load', 'error');
+            }
+        }, 100);
+    }
+
 }
 
 // Roster selection

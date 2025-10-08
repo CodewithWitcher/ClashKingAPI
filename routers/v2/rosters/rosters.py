@@ -1,3 +1,4 @@
+import aiohttp
 import coc
 import linkd
 import pendulum as pend
@@ -21,6 +22,7 @@ from routers.v2.rosters.roster_utils import (calculate_player_hitrate,
                                              refresh_member_data)
 from utils.custom_coc import CustomClashClient
 from utils.database import MongoClient
+from utils.discord_api import get_discord_channels
 from utils.security import check_authentication
 from utils.utils import gen_clean_custom_id, generate_access_token
 
@@ -188,6 +190,10 @@ async def update_roster(
         else:
             body['th_restriction'] = None
 
+    # Map event_start_time to time field for database storage
+    if 'event_start_time' in body:
+        body['time'] = body['event_start_time']
+
     # Handle clan_tag and roster_type updates
     if 'roster_type' in body or 'clan_tag' in body:
         current_roster = await mongo.rosters.find_one({
@@ -337,6 +343,10 @@ async def get_roster(
 
     # Add parsed townhall restriction values to response for easier UI consumption
     doc['min_th'], doc['max_th'] = parse_th_restriction(doc.get('th_restriction'))
+
+    # Map time field to event_start_time for frontend compatibility
+    if doc.get('time'):
+        doc['event_start_time'] = doc['time']
 
     return {'roster': doc}
 
@@ -1663,7 +1673,7 @@ async def list_roster_automation(
         query['executed'] = False   # Only unexecuted rules
 
     # Fetch automations sorted by scheduled execution time (earliest first)
-    cursor = await mongo.roster_automation.find(query, {'_id': 0}).sort(
+    cursor = mongo.roster_automation.find(query, {'_id': 0}).sort(
         {'scheduled_time': 1}
     )
     automations = await cursor.to_list(length=None)
@@ -2037,3 +2047,127 @@ async def generate_server_roster_token(
         'token': token_info['token'],                          # Raw token for API access
         'expires_at': token_info['expires_at'].isoformat(),   # When token expires
     }
+
+
+@router.get('/server/{server_id}/discord-channels', name='Get Discord Channels')
+@linkd.ext.fastapi.inject
+@check_authentication
+async def get_server_discord_channels(
+    server_id: int,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    *,
+    mongo: MongoClient,
+):
+    """
+    Retrieve Discord channels for a server with write permissions, filtered and sorted for automation use.
+
+    Input:
+        - server_id: Discord server ID to get channels for
+        - credentials: JWT authentication token
+
+    Output:
+        - List of channels suitable for automation (text channels with write permissions)
+        - Channels are categorized and sorted by relevance for automation
+        - HTTP 401 if unauthorized
+
+    Note: Filters for channels likely to be used for announcements, events, or notifications
+    """
+
+    try:
+        # Import here to ensure fresh config
+        from utils.discord_api import discord_api
+
+        # Check if bot token is configured
+        if not discord_api.config.bot_token:
+            raise HTTPException(
+                status_code=503,
+                detail='Discord bot token not configured'
+            )
+
+        result = await get_discord_channels(server_id)
+        return result
+
+    except aiohttp.ClientError as e:
+        # Discord API specific errors
+        if 'Unauthorized' in str(e) or '401' in str(e):
+            raise HTTPException(
+                status_code=401,
+                detail='Discord bot token is invalid or expired'
+            )
+        elif 'Forbidden' in str(e) or '403' in str(e):
+            raise HTTPException(
+                status_code=403,
+                detail='Discord bot does not have access to this server'
+            )
+        else:
+            raise HTTPException(
+                status_code=503,
+                detail=f'Discord API error: {str(e)}'
+            )
+    except Exception as e:
+        import traceback
+        error_details = f'Error fetching Discord channels: {str(e)}\n{traceback.format_exc()}'
+        print(f"DEBUG: {error_details}")  # For debugging
+        raise HTTPException(
+            status_code=500,
+            detail=f'Internal server error: {str(e)}'
+        )
+
+
+@router.get('/server/{server_id}/discord-test', name='Test Discord API Access')
+@linkd.ext.fastapi.inject
+@check_authentication
+async def test_discord_api_access(
+    server_id: int,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    *,
+    mongo: MongoClient,
+):
+    """Test endpoint to verify Discord API configuration."""
+    try:
+        from utils.discord_api import discord_api
+
+        # Check bot token
+        if not discord_api.config.bot_token:
+            return {
+                'status': 'error',
+                'message': 'Bot token not configured',
+                'bot_token_present': False
+            }
+
+        # Test a simple Discord API call
+        url = f'https://discord.com/api/v10/guilds/{server_id}'
+        headers = {
+            'Authorization': f'Bot {discord_api.config.bot_token}',
+            'Content-Type': 'application/json'
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                status_code = response.status
+
+                if status_code == 200:
+                    guild_data = await response.json()
+                    return {
+                        'status': 'success',
+                        'message': 'Discord API access working',
+                        'bot_token_present': True,
+                        'guild_name': guild_data.get('name', 'Unknown'),
+                        'status_code': status_code
+                    }
+                else:
+                    error_text = await response.text()
+                    return {
+                        'status': 'error',
+                        'message': f'Discord API error: {error_text}',
+                        'bot_token_present': True,
+                        'status_code': status_code
+                    }
+
+    except Exception as e:
+        import traceback
+        return {
+            'status': 'error',
+            'message': str(e),
+            'traceback': traceback.format_exc()
+        }

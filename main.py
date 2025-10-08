@@ -1,4 +1,3 @@
-import asyncio
 import sentry_sdk
 import uvicorn
 import contextlib
@@ -6,7 +5,6 @@ import coc
 import linkd
 import hikari
 import typing as t
-import pendulum as pend
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 
 from startup import define_app
@@ -62,18 +60,7 @@ registry.register_value(hikari.RESTApp, rest)
 
 @contextlib.asynccontextmanager
 async def lifespan(_: fastapi.FastAPI) -> t.AsyncGenerator[None, t.Any]:
-    # Login with CoC credentials
-    print(f"Attempting CoC login with email: {config.coc_email}")
-    
-    try:
-        await coc_client.login(email=config.coc_email, password=config.coc_password)
-        print("CoC client logged in successfully")
-    except Exception as e:
-        print(f"Failed to login to CoC: {e}")
-        print(f"Exception type: {type(e)}")
-        # Continue without CoC login for now
-        pass
-    
+    await coc_client.login_with_tokens('')
     await rest.start()
     yield
     await manager.close()
