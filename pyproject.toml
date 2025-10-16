@@ -1,0 +1,46 @@
+[project]
+name = "clashking-api"
+version = "0.1.0"
+description = "API serving Clash of Clans stats for ClashKing"
+
+requires-python = "==3.13.7"
+dependencies = [
+    "aiocache",
+    "bcrypt",
+    "coc-py @ git+https://github.com/mathsman5133/coc.py.git@march-update",
+    "cryptography",
+    "expiring-dict",
+    "fastapi",
+    "fastapi-mail",
+    "gunicorn",
+    "hashids",
+    "hikari @ git+https://github.com/hikari-py/hikari.git",
+    "linkd",
+    "matplotlib",
+    "orjson",
+    "pandas",
+    "passlib",
+    "pendulum",
+    "pillow",
+    "pydantic",
+    "pyjwt",
+    "pymongo",
+    "python-dotenv",
+    "python-snappy",
+    "redis",
+    "sentry-sdk",
+    "slowapi",
+    "uvloop",
+    "uvicorn",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "isort",
+    "flake8",
+]
+
+[tool.uv]
+package = false
