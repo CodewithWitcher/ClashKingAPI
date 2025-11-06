@@ -2,6 +2,71 @@
  * Additional Roster Utility Functions
  */
 
+// Show create roster modal
+function showCreateRosterModal() {
+    document.getElementById('modal-overlay').classList.remove('hidden');
+    document.getElementById('create-roster-modal').classList.remove('hidden');
+
+    // Reset form
+    const form = document.querySelector('#create-roster-modal form');
+    if (form) form.reset();
+
+    // Show clan selection by default (clan type is default)
+    toggleCreateClanSelection();
+}
+
+// Toggle clan selection visibility in create roster modal
+function toggleCreateClanSelection() {
+    const rosterType = document.getElementById('create-roster-type')?.value;
+    const clanSelection = document.getElementById('create-clan-selection');
+    const clanSelect = document.getElementById('create-clan-select');
+
+    if (rosterType === 'family') {
+        if (clanSelection) clanSelection.style.display = 'none';
+        if (clanSelect) clanSelect.required = false;
+    } else {
+        if (clanSelection) clanSelection.style.display = 'block';
+        if (clanSelect) clanSelect.required = true;
+    }
+}
+
+// Create a new roster
+async function createRoster(event) {
+    event.preventDefault();
+
+    const formData = new FormData(event.target);
+    const data = {
+        alias: formData.get('alias'),
+        roster_type: formData.get('roster_type'),
+        signup_scope: formData.get('signup_scope')
+    };
+
+    // Only include clan_tag if roster type is clan
+    if (data.roster_type === 'clan') {
+        const clanTag = formData.get('clan_tag');
+        if (!clanTag) {
+            showAlert('Please select a clan for clan-specific rosters', 'error');
+            return;
+        }
+        data.clan_tag = clanTag;
+    }
+
+    try {
+        const response = await apiCall(`${API_BASE}/roster?server_id=${serverId}`, 'POST', data);
+        const newRoster = response.roster;
+
+        showAlert('Roster created successfully!');
+
+        // Redirect to the new roster (which will reload the page with the new roster selected)
+        const url = new URL(window.location);
+        url.searchParams.set('roster_id', newRoster.custom_id);
+        window.location.href = url.toString();
+    } catch (error) {
+        console.error('Error creating roster:', error);
+        showAlert('Failed to create roster: ' + error.message, 'error');
+    }
+}
+
 // Clear bulk tags
 function clearBulkTags() {
     const textarea = document.getElementById('bulk-tags-input');
@@ -76,9 +141,9 @@ function createRosterInfoDisplay(roster) {
             <div class="bg-muted/30 px-6 py-4 border-b border-border">
                 <div class="flex items-center justify-between">
                     <h3 class="font-semibold text-lg flex items-center gap-3">
-                        ${roster.clan_name ? `
-                            <img src="${roster.clan_badge || '/static/default-clan.png'}" 
-                                 alt="Clan Badge" 
+                        ${roster.clan_name && roster.clan_badge ? `
+                            <img src="${roster.clan_badge}"
+                                 alt="Clan Badge"
                                  class="w-8 h-8 rounded-full border-2 border-border shadow-sm"
                                  onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';">
                             <i data-lucide="${roster.roster_type === 'family' ? 'users' : 'users-2'}" class="w-5 h-5" style="display: none;"></i>

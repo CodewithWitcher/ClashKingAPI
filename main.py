@@ -5,7 +5,14 @@ import coc
 import linkd
 import hikari
 import typing as t
+import logging
 from sentry_sdk.integrations.fastapi import FastApiIntegration
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 from startup import define_app
 import fastapi

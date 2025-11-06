@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(python:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(cat:*)",
+      "Bash(sed:*)",
+      "Bash(cp:*)",
+      "Bash(git checkout:*)",
+      "Read(//mnt/c/Users/Valen/Documents/ClashKingAPI/templates/**)",
+      "Read(//mnt/c/Users/Valen/Documents/ClashKingAPI/**)"
     ],
     "deny": [],
     "ask": []

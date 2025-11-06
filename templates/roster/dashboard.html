@@ -143,6 +143,58 @@
                 </div>
             </form>
         </div>
+
+        <!-- Create Roster Modal -->
+        <div id="create-roster-modal" class="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-card border border-border rounded-lg p-6 w-full max-w-md hidden" onclick="event.stopPropagation()">
+            <h3 class="text-lg font-semibold mb-4">Create New Roster</h3>
+            <form onsubmit="createRoster(event)">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Roster Name</label>
+                        <input type="text" name="alias" required maxlength="64"
+                               placeholder="e.g., CWL Main, War Backup"
+                               class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Organization Type</label>
+                        <select name="roster_type" id="create-roster-type" onchange="toggleCreateClanSelection()" required
+                                class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent">
+                            <option value="clan">Clan-specific</option>
+                            <option value="family">Family-wide</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Signup Permissions</label>
+                        <select name="signup_scope" required
+                                class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent">
+                            <option value="clan-only">Clan members only</option>
+                            <option value="family-wide">Family members</option>
+                        </select>
+                    </div>
+
+                    <div id="create-clan-selection">
+                        <label class="block text-sm font-medium mb-2">Associated Clan</label>
+                        <select name="clan_tag" id="create-clan-select" required
+                                class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent">
+                            <option value="">Select a clan...</option>
+                            {% for clan in server_clans %}
+                                <option value="{{ clan.tag }}">{{ clan.name if clan.name else clan.tag }} ({{ clan.tag }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="flex gap-3 mt-6">
+                    <button type="button" onclick="closeModals()" class="flex-1 px-3 py-2 bg-secondary text-secondary-foreground rounded-md text-sm hover:bg-secondary/80 transition-colors">
+                        Cancel
+                    </button>
+                    <button type="submit" class="flex-1 px-3 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 transition-colors">
+                        Create Roster
+                    </button>
+                </div>
+            </form>
+        </div>
     </div>
 
     <!-- Scripts -->

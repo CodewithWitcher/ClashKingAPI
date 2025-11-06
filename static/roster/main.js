@@ -5,13 +5,13 @@
 // Initialize dashboard
 function initializeDashboard() {
     console.log('Initializing roster dashboard...');
-    
+
     // Load clan members for search
     loadClanMembers();
-    
+
     // Populate category dropdowns
     populateCategoryDropdown();
-    
+
     // Show appropriate content based on current roster
     if (currentRosterId) {
         showRosterUI();
@@ -20,21 +20,25 @@ function initializeDashboard() {
         if (savedTab === 'members') {
             loadMembersDisplay();
         }
+        // Load automations for sidebar status (lightweight)
+        if (typeof loadAutomationsForSidebar === 'function') {
+            loadAutomationsForSidebar();
+        }
     } else {
         document.getElementById('welcome-content').style.display = 'block';
         document.getElementById('roster-tabs').style.display = 'none';
     }
-    
+
     // Hide autocomplete on click outside
     document.addEventListener('click', function(event) {
         const searchContainer = document.getElementById('member-search')?.parentElement;
         const suggestions = document.getElementById('member-suggestions');
-        
+
         if (suggestions && searchContainer && !searchContainer.contains(event.target)) {
             suggestions.classList.add('hidden');
         }
     });
-    
+
     console.log('Dashboard initialized successfully');
 }
 
@@ -138,6 +142,11 @@ async function selectRoster() {
         // Update UI with new roster data
         updateRosterUI(roster);
         showRosterUI();
+
+        // Load automations for sidebar status (lightweight)
+        if (typeof loadAutomationsForSidebar === 'function') {
+            loadAutomationsForSidebar();
+        }
     } catch (error) {
         showAlert('Failed to load roster data', 'error');
         // Reset selector to previous value

@@ -44,6 +44,7 @@ async function saveRosterSettings(event) {
     if (formData.get('roster_type')) updateData.roster_type = formData.get('roster_type');
     if (formData.get('signup_scope')) updateData.signup_scope = formData.get('signup_scope');
     if (formData.get('clan_tag') !== null) updateData.clan_tag = formData.get('clan_tag') || null;
+    if (formData.get('group_id') !== null) updateData.group_id = formData.get('group_id') || null;
     
     // Requirements
     if (formData.get('min_th')) updateData.min_th = parseInt(formData.get('min_th'));
@@ -122,6 +123,7 @@ function updateSettingsForm(roster) {
         if (roster.roster_type) form.elements['roster_type'].value = roster.roster_type;
         if (roster.signup_scope) form.elements['signup_scope'].value = roster.signup_scope;
         if (roster.clan_tag) form.elements['clan_tag'].value = roster.clan_tag;
+        if (roster.group_id) form.elements['group_id'].value = roster.group_id;
         
         // Requirements
         if (roster.min_th) form.elements['min_th'].value = roster.min_th;

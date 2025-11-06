@@ -75,17 +75,32 @@
                         </select>
                     </div>
                 </div>
-                <div class="space-y-2">
-                    <label class="text-sm font-medium">Associated Clan</label>
-                    <select name="clan_tag"
-                            class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent">
-                        <option value="">Select a clan...</option>
-                        {% for clan in server_clans %}
-                            <option value="{{ clan.tag }}" {% if current_roster and current_roster.clan_tag == clan.tag %}selected{% endif %}>
-                                {{ clan.name }} ({{ clan.tag }})
-                            </option>
-                        {% endfor %}
-                    </select>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="space-y-2">
+                        <label class="text-sm font-medium">Associated Clan</label>
+                        <select name="clan_tag"
+                                class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent">
+                            <option value="">Select a clan...</option>
+                            {% for clan in server_clans %}
+                                <option value="{{ clan.tag }}" {% if current_roster and current_roster.clan_tag == clan.tag %}selected{% endif %}>
+                                    {{ clan.name if clan.name else clan.tag }} ({{ clan.tag }})
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-sm font-medium">Roster Group</label>
+                        <select name="group_id"
+                                class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent">
+                            <option value="">No group assigned</option>
+                            {% for group in groups %}
+                                <option value="{{ group.group_id }}" {% if current_roster and current_roster.group_id == group.group_id %}selected{% endif %}>
+                                    {{ group.alias }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <p class="text-xs text-muted-foreground">Groups help organize rosters for bulk operations</p>
+                    </div>
                 </div>
             </div>
 

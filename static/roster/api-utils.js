@@ -27,8 +27,21 @@ async function apiCall(endpoint, method = 'GET', data = null) {
             } catch (e) {
                 errorData = { detail: errorText || 'Unknown error' };
             }
-            
-            const error = new Error(errorData.detail || `HTTP ${response.status}`);
+
+            // Handle FastAPI validation errors (422)
+            let errorMessage = `HTTP ${response.status}`;
+            if (errorData.detail) {
+                if (Array.isArray(errorData.detail)) {
+                    // Validation errors from FastAPI/Pydantic
+                    errorMessage = errorData.detail.map(e => `${e.loc.join('.')}: ${e.msg}`).join(', ');
+                } else if (typeof errorData.detail === 'string') {
+                    errorMessage = errorData.detail;
+                } else {
+                    errorMessage = JSON.stringify(errorData.detail);
+                }
+            }
+
+            const error = new Error(errorMessage);
             error.status = response.status;
             error.data = errorData;
             throw error;

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/static/favicon-dark.png">
+    <title>{{ group.alias }} - Group Settings</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        background: '#0a0a0b',
+                        foreground: '#fafafa',
+                        muted: '#171717',
+                        'muted-foreground': '#a1a1aa',
+                        popover: '#0a0a0b',
+                        'popover-foreground': '#fafafa',
+                        card: '#0a0a0b',
+                        'card-foreground': '#fafafa',
+                        border: '#27272a',
+                        input: '#27272a',
+                        primary: '#3b82f6',
+                        'primary-foreground': '#f8fafc',
+                        secondary: '#27272a',
+                        'secondary-foreground': '#fafafa',
+                        accent: '#27272a',
+                        'accent-foreground': '#fafafa',
+                        destructive: '#dc2626',
+                        'destructive-foreground': '#fafafa',
+                        ring: '#3b82f6',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        {% include 'roster/styles.css' %}
+    </style>
+</head>
+
+<body class="bg-background text-foreground min-h-screen">
+    <!-- Alerts Container -->
+    <div id="alerts" class="fixed top-4 right-4 z-50 space-y-3"></div>
+
+    <!-- Main Container -->
+    <div class="container mx-auto p-6">
+        <div class="max-w-4xl mx-auto">
+    <!-- Header with back button -->
+    <div class="mb-6">
+        <a href="javascript:history.back()" class="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-4">
+            <i data-lucide="arrow-left" class="w-4 h-4"></i>
+            Back to Groups
+        </a>
+        <div class="flex items-center justify-between">
+            <div>
+                <h2 class="text-2xl font-semibold">{{ group.alias }}</h2>
+                <p class="text-muted-foreground text-sm">Group Settings</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Basic Configuration Section -->
+    <div class="bg-card border border-border rounded-lg p-6 mb-6">
+        <div class="flex items-center gap-2 mb-4">
+            <i data-lucide="settings" class="w-5 h-5"></i>
+            <h3 class="text-lg font-semibold">Basic Configuration</h3>
+        </div>
+
+        <div class="space-y-4">
+            <div class="space-y-2">
+                <label class="text-sm font-medium">Max Accounts Per User</label>
+                <input type="number" id="group-max-accounts"
+                       value="{{ group.max_accounts_per_user or '' }}"
+                       min="0" max="100" placeholder="No limit"
+                       class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent">
+                <p class="text-xs text-muted-foreground">
+                    Maximum number of roster slots a user can sign up for across all rosters in this group. Leave empty for no limit.
+                </p>
+            </div>
+
+            <div class="flex justify-end">
+                <button onclick="saveBasicSettings()"
+                        class="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 transition-colors">
+                    Save Settings
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Group Reminders Section -->
+    <div class="bg-card border border-border rounded-lg p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2">
+                <i data-lucide="bell" class="w-5 h-5"></i>
+                <h3 class="text-lg font-semibold">Group Reminders</h3>
+            </div>
+            <button onclick="showAddGroupReminder()"
+                    class="px-3 py-1.5 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 transition-colors flex items-center gap-2">
+                <i data-lucide="plus" class="w-4 h-4"></i>
+                Add Reminder
+            </button>
+        </div>
+
+        <p class="text-sm text-muted-foreground mb-4">
+            Configure reminders for users not signed up in any roster of this group, or with specific criteria.
+        </p>
+
+        <div id="group-reminders-list" class="space-y-3">
+            <!-- Will be populated by JS -->
+            <div class="text-center py-8 text-muted-foreground">
+                <i data-lucide="bell-off" class="w-12 h-12 mx-auto mb-3 opacity-50"></i>
+                <p class="text-sm">No group reminders configured</p>
+                <p class="text-xs mt-1">Click "Add Reminder" to create one</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rosters in this Group -->
+    <div class="bg-card border border-border rounded-lg p-6">
+        <div class="flex items-center gap-2 mb-4">
+            <i data-lucide="users" class="w-5 h-5"></i>
+            <h3 class="text-lg font-semibold">Rosters in this Group</h3>
+        </div>
+
+        {% if rosters %}
+            <div class="space-y-2">
+                {% for roster in rosters %}
+                    <div class="flex items-center justify-between p-3 bg-muted/30 rounded-lg hover:bg-muted/50 transition-colors">
+                        <div class="flex items-center gap-3">
+                            <div class="w-2 h-2 rounded-full bg-primary"></div>
+                            <div>
+                                <div class="font-medium text-sm">{{ roster.alias }}</div>
+                                <div class="text-xs text-muted-foreground">
+                                    {{ roster.members|length if roster.members else 0 }} members
+                                </div>
+                            </div>
+                        </div>
+                        <a href="{{ url_for('roster_ui_view', roster_id=roster.custom_id, server_id=server_id, token=roster_token) }}"
+                           class="px-3 py-1 bg-secondary hover:bg-secondary/80 rounded text-xs transition-colors">
+                            View
+                        </a>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="text-center py-8 text-muted-foreground">
+                <i data-lucide="folder-open" class="w-12 h-12 mx-auto mb-3 opacity-50"></i>
+                <p class="text-sm">No rosters in this group yet</p>
+            </div>
+        {% endif %}
+    </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script>
+        const API_BASE = '/v2';
+        const serverId = {{ server_id }};
+    </script>
+    <script src="{{ url_for('static', path='roster/api-utils.js') }}?v={{ timestamp }}"></script>
+    <script src="{{ url_for('static', path='roster/group-settings.js') }}?v={{ timestamp }}"></script>
+
+    <script>
+        // Initialize lucide icons
+        lucide.createIcons();
+    </script>
+</body>
+</html>

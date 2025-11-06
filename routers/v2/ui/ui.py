@@ -3,14 +3,17 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 import linkd.ext.fastapi
-from bson import ObjectId
+from bson import ObjectId, Int64
 import json
 from datetime import datetime
+import logging
 
 from utils.database import MongoClient, OldMongoClient
 
 router = APIRouter(prefix='/ui', tags=['UI Pages'])
 templates = Jinja2Templates(directory="templates")
+
+logger = logging.getLogger(__name__)
 
 
 def convert_objectids(obj):
@@ -32,7 +35,7 @@ def convert_objectids(obj):
 @router.get("/roster/dashboard", response_class=HTMLResponse)
 @linkd.ext.fastapi.inject
 async def roster_dashboard(
-    request: Request, 
+    request: Request,
     server_id: int,
     token: str,
     roster_id: str = None,
@@ -43,7 +46,7 @@ async def roster_dashboard(
     try:
         # Validate token for server access (not roster-specific)
         token_data = await mongo.tokens_db.find_one({
-            'token': token, 
+            'token': token,
             'type': 'roster',
             'server_id': server_id
         })
@@ -118,26 +121,32 @@ async def roster_dashboard(
             'server_id': {'$in': [server_id, str(server_id), int(server_id)]}
         }).to_list(length=None))
 
-        # Get clans linked to this server
         server_clans = list(await mongo.clans.find({
             'server': server_id
         }).to_list(length=None))
-        
+
         # Convert ObjectIds to strings for JSON serialization
-        current_roster = convert_objectids(current_roster)
-        all_rosters = convert_objectids(all_rosters)
-        groups = convert_objectids(groups)
-        categories = convert_objectids(categories)
-        server_clans = convert_objectids(server_clans)
-        
+        try:
+            current_roster = convert_objectids(current_roster)
+            all_rosters = convert_objectids(all_rosters)
+            groups = convert_objectids(groups)
+            categories = convert_objectids(categories)
+            server_clans = convert_objectids(server_clans)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error converting ObjectIds: {str(e)}")
+
         # Convert to JSON strings to handle None values properly
         import json
-        current_roster_json = json.dumps(current_roster) if current_roster else 'null'
-        all_rosters_json = json.dumps(all_rosters)
-        categories_json = json.dumps(categories)
-        server_clans_json = json.dumps(server_clans)
+        try:
+            current_roster_json = json.dumps(current_roster) if current_roster else 'null'
+            all_rosters_json = json.dumps(all_rosters)
+            categories_json = json.dumps(categories)
+            server_clans_json = json.dumps(server_clans)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error serializing to JSON: {str(e)}")
         
         import time
+
         return templates.TemplateResponse("roster/dashboard.html", {
             "request": request,
             "current_roster": current_roster,
@@ -151,8 +160,74 @@ async def roster_dashboard(
             "server_clans_json": server_clans_json,
             "server_id": server_id,
             "roster_id": roster_id,
+            "roster_token": token,
             "timestamp": int(time.time())
         })
-        
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading roster dashboard: {str(e)}")
+
+
+@router.get("/group/{group_id}", response_class=HTMLResponse)
+@linkd.ext.fastapi.inject
+async def group_settings_page(
+    request: Request,
+    server_id: int,
+    token: str,
+    group_id: str,
+    *,
+    mongo: MongoClient
+):
+    """Serve the group settings page using token authentication"""
+    try:
+        # Validate token for server access
+        token_data = await mongo.tokens_db.find_one({
+            'token': token,
+            'type': 'roster',
+            'server_id': server_id
+        })
+
+        if not token_data:
+            raise HTTPException(status_code=404, detail="Invalid or expired token")
+
+        # Check if token is expired
+        expires_at = token_data['expires_at']
+        if not hasattr(expires_at, 'tzinfo') or expires_at.tzinfo is None:
+            expires_at = pend.instance(expires_at, tz=pend.UTC)
+
+        if expires_at < pend.now(tz=pend.UTC):
+            raise HTTPException(status_code=404, detail="Token has expired")
+
+        # Get the group
+        group = await mongo.roster_groups.find_one({
+            'group_id': group_id,
+            'server_id': server_id
+        })
+
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found")
+
+        # Get all rosters in this group
+        rosters = list(await mongo.rosters.find({
+            'server_id': server_id,
+            'group_id': group_id
+        }).to_list(length=None))
+
+        # Convert ObjectIds to strings
+        group = convert_objectids(group)
+        rosters = convert_objectids(rosters)
+
+        import time
+        return templates.TemplateResponse("roster/group_settings.html", {
+            "request": request,
+            "group": group,
+            "rosters": rosters,
+            "server_id": server_id,
+            "roster_token": token,
+            "timestamp": int(time.time())
+        })
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading roster dashboard: {str(e)}")
