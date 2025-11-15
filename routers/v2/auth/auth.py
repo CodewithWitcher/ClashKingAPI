@@ -109,7 +109,7 @@ async def verify_email_with_code(
             raise HTTPException(status_code=500, detail="Invalid verification record")
 
         # Check if email is already registered (to prevent race conditions)
-        existing_user = await mongo.auth_users.find_one({"email_hash": email_hash})
+        existing_user = await mongo.users.find_one({"email_hash": email_hash})
 
         if existing_user:
             # Check if it's a Discord user trying to add email auth
@@ -119,7 +119,7 @@ async def verify_email_with_code(
                 auth_methods = set(existing_user.get("auth_methods", []))
                 auth_methods.add("email")
 
-                await mongo.auth_users.update_one(
+                await mongo.users.update_one(
                     {"user_id": existing_user["user_id"]},
                     {"$set": {
                         "auth_methods": list(auth_methods),
@@ -144,7 +144,7 @@ async def verify_email_with_code(
             user_id = str(user_id_raw)
 
             try:
-                await mongo.auth_users.insert_one({
+                await mongo.users.insert_one({
                     "user_id": user_id,
                     "email_encrypted": user_data["email_encrypted"],
                     "email_hash": user_data["email_hash"],
@@ -209,11 +209,11 @@ async def get_current_user_info(
 ) -> UserInfo:
     try:
         # Try both string and int formats for user_id lookup (consistency with security middleware)
-        current_user = await mongo.auth_users.find_one({"user_id": user_id})
+        current_user = await mongo.users.find_one({"user_id": user_id})
         if not current_user:
             try:
                 user_id_int = int(user_id)
-                current_user = await mongo.auth_users.find_one({"user_id": user_id_int})
+                current_user = await mongo.users.find_one({"user_id": user_id_int})
             except (ValueError, TypeError):
                 pass
 
@@ -287,6 +287,7 @@ async def auth_discord(request: Request, *, config: Config, mongo: MongoClient, 
 
         async with rest.acquire(None) as client:
             try:
+                print(f"🔍 Exchanging code for token with redirect_uri={redirect_uri}")
                 auth = await client.authorize_access_token(
                     client=config.discord_client_id,
                     client_secret=config.discord_client_secret,
@@ -294,6 +295,18 @@ async def auth_discord(request: Request, *, config: Config, mongo: MongoClient, 
                     redirect_uri=redirect_uri,
                     code_verifier=code_verifier
                 )
+                print(f"✅ Got auth token")
+                print(f"🔍 Auth object type: {type(auth).__name__}")
+                print(f"🔍 Auth scopes: {getattr(auth, 'scopes', 'No scopes attribute')}")
+
+                # Test the token immediately by fetching guilds
+                print(f"🔍 Testing token by fetching guilds...")
+                async with rest.acquire(token=auth.access_token, token_type=hikari.TokenType.BEARER) as test_client:
+                    test_guilds = await test_client.fetch_my_guilds()
+                    print(f"🔍 Test fetch returned {len(test_guilds)} guilds")
+                    if len(test_guilds) > 0:
+                        test_guild = test_guilds[0]
+                        print(f"🔍 First guild: {test_guild.name}, permissions={getattr(test_guild, 'permissions', 'NO PERMISSIONS')}")
             except hikari.errors.UnauthorizedError:
                 sentry_sdk.capture_message(
                     f"Incorrect client or client secret passed",
@@ -322,7 +335,7 @@ async def auth_discord(request: Request, *, config: Config, mongo: MongoClient, 
         if user.email:
             email_hash = hash_email(user.email)
             email_conditions.append({"email_hash": email_hash})
-        existing_user = await mongo.auth_users.find_one({"$or": email_conditions})
+        existing_user = await mongo.users.find_one({"$or": email_conditions})
 
         if existing_user:
             user_id = existing_user["user_id"]
@@ -339,7 +352,7 @@ async def auth_discord(request: Request, *, config: Config, mongo: MongoClient, 
                 email_data = await prepare_email_for_storage(user.email)
                 update_data.update(email_data)
 
-            await mongo.auth_users.update_one(
+            await mongo.users.update_one(
                 {"user_id": user_id},
                 {"$set": update_data}
             )
@@ -357,7 +370,7 @@ async def auth_discord(request: Request, *, config: Config, mongo: MongoClient, 
                 email_data = await prepare_email_for_storage(user.email)
                 insert_data.update(email_data)
 
-            await mongo.auth_users.insert_one(insert_data)
+            await mongo.users.insert_one(insert_data)
 
         encrypted_discord_access = await encrypt_data(auth.access_token)
         encrypted_discord_refresh = await encrypt_data(str(auth.refresh_token))
@@ -368,7 +381,7 @@ async def auth_discord(request: Request, *, config: Config, mongo: MongoClient, 
                 "$set": {
                     "discord_access_token": encrypted_discord_access,
                     "discord_refresh_token": encrypted_discord_refresh,
-                    "expires_at": pend.now(tz=pend.UTC).add(seconds=auth.expires_in.seconds)
+                    "expires_at": pend.now(tz=pend.UTC).add(seconds=int(auth.expires_in.total_seconds()))
                 }
             },
             upsert=True
@@ -400,8 +413,15 @@ async def auth_discord(request: Request, *, config: Config, mongo: MongoClient, 
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        error_details = {
+            "error": str(e),
+            "type": type(e).__name__,
+            "traceback": traceback.format_exc()
+        }
+        print(f"❌ ERROR in /auth/discord: {error_details}")
         sentry_sdk.capture_exception(e, tags={"endpoint": "/auth/discord"})
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 
@@ -462,7 +482,7 @@ async def register_email_user(req: EmailRegisterRequest, *, mongo: MongoClient, 
 
         # Check if email is already registered or has pending verification
         email_hash = hash_email(str(req.email))
-        existing_user = await mongo.auth_users.find_one({"email_hash": email_hash})
+        existing_user = await mongo.users.find_one({"email_hash": email_hash})
 
         if existing_user and "email" in existing_user.get("auth_methods", []):
             # Email already registered for email auth
@@ -568,7 +588,7 @@ async def resend_verification_email(request: Request, *, mongo: MongoClient) -> 
 
         if not pending_verification:
             # Check if user already exists with this email
-            existing_user = await mongo.auth_users.find_one({"email_hash": email_hash})
+            existing_user = await mongo.users.find_one({"email_hash": email_hash})
             if existing_user and "email" in existing_user.get("auth_methods", []):
                 raise HTTPException(status_code=400,
                                     detail="This email is already verified. Please try logging in instead.")
@@ -640,7 +660,7 @@ async def login_with_email(req: EmailAuthRequest, *, mongo: MongoClient) -> Auth
 
         # Look up user by email hash
         email_hash = hash_email(str(req.email))
-        user = await mongo.auth_users.find_one({"email_hash": email_hash})
+        user = await mongo.users.find_one({"email_hash": email_hash})
 
         if not user:
             # Check if email exists but is not verified yet
@@ -737,7 +757,7 @@ async def link_discord_account(
         decoded_token = decode_jwt(token)
         user_id = decoded_token["sub"]
 
-        current_user = await mongo.auth_users.find_one({"user_id": user_id})
+        current_user = await mongo.users.find_one({"user_id": user_id})
         if not current_user:
             sentry_sdk.capture_message(f"User not found for Discord linking: {user_id}", level="warning")
             raise HTTPException(status_code=404, detail="User not found")
@@ -766,14 +786,14 @@ async def link_discord_account(
 
 
         # Prevent linking a Discord account already linked to another user
-        conflict_user = await mongo.auth_users.find_one({"linked_accounts.discord.discord_user_id": user.id})
+        conflict_user = await mongo.users.find_one({"linked_accounts.discord.discord_user_id": user.id})
         if conflict_user and conflict_user["user_id"] != user_id:
             sentry_sdk.capture_message(
                 f"Discord account {user.id} already linked to user {conflict_user['user_id']}, attempted by {user_id}",
                 level="warning")
             raise HTTPException(status_code=400, detail="Discord account already linked to another user")
 
-        await mongo.auth_users.update_one(
+        await mongo.users.update_one(
             {"user_id": user_id},
             {"$set": {
                 "auth_methods": list(set(current_user.get("auth_methods", []) + ["discord"])),
@@ -835,14 +855,14 @@ async def link_email_account(
                                        level="warning")
             raise e
 
-        current_user = await mongo.auth_users.find_one({"user_id": user_id})
+        current_user = await mongo.users.find_one({"user_id": user_id})
         if not current_user:
             sentry_sdk.capture_message(f"User not found for email linking: {user_id}", level="warning")
             raise HTTPException(status_code=404, detail="User not found")
 
         # Check for email conflicts using hash
         email_hash = hash_email(str(req.email))
-        email_conflict = await mongo.auth_users.find_one({"email_hash": email_hash})
+        email_conflict = await mongo.users.find_one({"email_hash": email_hash})
         if email_conflict and email_conflict["user_id"] != user_id:
             sentry_sdk.capture_message(
                 f"Email {safe_email_log(str(req.email))} already linked to user {email_conflict['user_id']}, attempted by {user_id}",
@@ -852,7 +872,7 @@ async def link_email_account(
         # Prepare encrypted email data
         email_data = await prepare_email_for_storage(str(req.email))
 
-        await mongo.auth_users.update_one(
+        await mongo.users.update_one(
             {"user_id": user_id},
             {"$set": {
                 "auth_methods": list(set(current_user.get("auth_methods", []) + ["email"])),
@@ -886,7 +906,7 @@ async def forgot_password(req: ForgotPasswordRequest, *, mongo: MongoClient):
 
         # Check if user exists with this email
         email_hash = hash_email(str(req.email))
-        user = await mongo.auth_users.find_one({"email_hash": email_hash})
+        user = await mongo.users.find_one({"email_hash": email_hash})
 
         if not user or "email" not in user.get("auth_methods", []):
             # Return success regardless to prevent email enumeration
@@ -1011,14 +1031,14 @@ async def reset_password(req: ResetPasswordRequest, *, mongo: MongoClient):
             raise HTTPException(status_code=400, detail="Reset code has expired. Please request a new one.")
 
         # Get user
-        user = await mongo.auth_users.find_one({"user_id": reset_record["user_id"]})
+        user = await mongo.users.find_one({"user_id": reset_record["user_id"]})
         if not user:
             sentry_sdk.capture_message(f"User not found for password reset: {reset_record['user_id']}", level="error")
             raise HTTPException(status_code=400, detail="Invalid reset code")
 
         # Update password
         new_password_hash = hash_password(req.new_password)
-        await mongo.auth_users.update_one(
+        await mongo.users.update_one(
             {"user_id": user["user_id"]},
             {"$set": {"password": new_password_hash}}
         )

@@ -117,48 +117,55 @@ async def refresh_discord_access_token(
 
 async def get_valid_discord_access_token(
         user_id: str,
+        device_id: str,
         rest: hikari.RESTApp,
         mongo: MongoClient,
 ) -> str:
     """
     Verifies if the Discord access token is still valid and refreshes it if needed.
     """
-    discord_token = await mongo.app_discord_tokens.find_one({"user_id": user_id})
-    if not discord_token:
-        raise HTTPException(status_code=401, detail="Missing Discord refresh token")
+    try:
+        discord_token = await mongo.auth_discord_tokens.find_one({"user_id": user_id, "device_id": device_id})
 
-    # Decrypt the access and refresh tokens
-    encrypted_access_token = discord_token.get("discord_access_token")
-    encrypted_refresh_token = discord_token.get("discord_refresh_token")
+        if not discord_token:
+            raise HTTPException(status_code=401, detail="Missing Discord refresh token")
 
-    if not encrypted_access_token or not encrypted_refresh_token:
-        raise HTTPException(status_code=401, detail="Invalid stored tokens")
+        # Decrypt the access and refresh tokens
+        encrypted_access_token = discord_token.get("discord_access_token")
+        encrypted_refresh_token = discord_token.get("discord_refresh_token")
 
-    access_token = await decrypt_data(encrypted_access_token)
-    refresh_token = await decrypt_data(encrypted_refresh_token)
+        if not encrypted_access_token or not encrypted_refresh_token:
+            raise HTTPException(status_code=401, detail="Invalid stored tokens")
 
-    # Check if the access token is still valid (add a buffer of 60s to prevent expiration race condition)
-    if pend.now(tz=pend.UTC).int_timestamp < discord_token["expires_at"].timestamp() - 60:
-        return access_token
+        access_token = await decrypt_data(encrypted_access_token)
 
-    # Refresh the access token
-    auth = await refresh_discord_access_token(refresh_token, rest)
+        # Check if the access token is still valid (add a buffer of 60s to prevent expiration race condition)
+        if pend.now(tz=pend.UTC).int_timestamp < discord_token["expires_at"].timestamp() - 60:
+            return access_token
 
-    # Encrypt and store the new access token with updated expiration time
-    new_encrypted_access = await encrypt_data(auth.access_token)
-    new_expires_in = auth.expires_in.seconds  # Default: 7 days (7 * 24 * 60 * 60)
+        # Refresh the access token (pass encrypted token)
+        auth = await refresh_discord_access_token(encrypted_refresh_token, rest)
 
-    await mongo.app_discord_tokens.update_one(
-        {"user_id": user_id},
-        {
-            "$set": {
-                "discord_access_token": new_encrypted_access,
-                "expires_at": pend.now(tz=pend.UTC).add(seconds=new_expires_in)
+        # Encrypt and store the new access token with updated expiration time
+        new_encrypted_access = await encrypt_data(auth.access_token)
+        new_expires_in = int(auth.expires_in.total_seconds())  # Default: 7 days (7 * 24 * 60 * 60)
+
+        await mongo.auth_discord_tokens.update_one(
+            {"user_id": user_id},
+            {
+                "$set": {
+                    "discord_access_token": new_encrypted_access,
+                    "expires_at": pend.now(tz=pend.UTC).add(seconds=new_expires_in)
+                }
             }
-        }
-    )
+        )
 
-    return auth.access_token
+        return auth.access_token
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting valid Discord access token: {str(e)}")
 
 
 def generate_refresh_token(user_id: str) -> str:

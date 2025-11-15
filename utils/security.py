@@ -15,16 +15,16 @@ config = Config()
 def check_authentication(func):
     @wraps(func)
     async def wrapper(*args, **kwargs):
-        if config.is_local:
-            sig = inspect.signature(func)
-            if "user_id" in sig.parameters:
-                kwargs["user_id"] = os.getenv("DEV_USER_ID")
-            return await func(*args, **kwargs)
-
         mongo = kwargs.get('mongo')
 
         credentials: HTTPAuthorizationCredentials = kwargs.get("credentials")
         if not credentials:
+            # In local mode, allow bypass without authentication for development
+            if config.is_local:
+                sig = inspect.signature(func)
+                if "user_id" in sig.parameters:
+                    kwargs["user_id"] = os.getenv("DEV_USER_ID")
+                return await func(*args, **kwargs)
             raise HTTPException(status_code=403, detail="Authentication token missing")
 
         auth_header = credentials.credentials
@@ -56,8 +56,9 @@ def check_authentication(func):
 
         # Option 3 : JWT token
         try:
-            decoded_token = jwt.decode(token, os.getenv("REFRESH_SECRET"), algorithms=os.getenv("ALGORITHM"))
+            decoded_token = jwt.decode(token, config.secret_key, algorithms=config.algorithm)
             user_id = decoded_token["sub"]
+            device_id = decoded_token.get("device")
 
             user = await mongo.users.find_one({"user_id": user_id})
             if not user:
@@ -80,6 +81,8 @@ def check_authentication(func):
             sig = inspect.signature(func)
             if "user_id" in sig.parameters:
                 kwargs["user_id"] = user_id
+            if "device_id" in sig.parameters and device_id:
+                kwargs["device_id"] = device_id
             return await func(*args, **kwargs)
 
         except Exception as e:
