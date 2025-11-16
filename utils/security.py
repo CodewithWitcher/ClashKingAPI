@@ -59,37 +59,33 @@ def check_authentication(func):
             decoded_token = jwt.decode(token, config.secret_key, algorithms=config.algorithm)
             user_id = decoded_token["sub"]
             device_id = decoded_token.get("device")
-
-            user = await mongo.users.find_one({"user_id": user_id})
-            if not user:
-                try:
-                    user_id_int = int(user_id)
-                    user = await mongo.users.find_one({"user_id": user_id_int})
-                except (ValueError, TypeError):
-                    pass
-
-            if not user:
-                raise HTTPException(status_code=401, detail="User not found")
-
-            if "server_id" in kwargs:
-                try:
-                    async with rest.acquire(token=config.bot_token, token_type=hikari.TokenType.BOT) as client:
-                        try:
-                            await client.fetch_member(kwargs["server_id"], user_id)
-                        except hikari.errors.NotFoundError:
-                            raise HTTPException(status_code=401, detail="This user is not a member of this guild")
-                except:
-                    raise HTTPException(status_code=500, detail="Failed to verify guild membership")
-
-            sig = inspect.signature(func)
-            if "user_id" in sig.parameters:
-                kwargs["user_id"] = user_id
-            if "device_id" in sig.parameters and device_id:
-                kwargs["device_id"] = device_id
-
-            return await func(*args, **kwargs)
-
         except Exception as e:
             raise HTTPException(status_code=401, detail="Invalid authentication token: " + str(e))
+
+        user = await mongo.users.find_one({"user_id": user_id})
+        if not user:
+            try:
+                user_id_int = int(user_id)
+                user = await mongo.users.find_one({"user_id": user_id_int})
+            except (ValueError, TypeError):
+                pass
+
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+
+        if "server_id" in kwargs:
+            async with rest.acquire(token=config.bot_token, token_type=hikari.TokenType.BOT) as client:
+                try:
+                    await client.fetch_member(kwargs["server_id"], user_id)
+                except hikari.errors.NotFoundError:
+                    raise HTTPException(status_code=401, detail="This user is not a member of this guild")
+
+        sig = inspect.signature(func)
+        if "user_id" in sig.parameters:
+            kwargs["user_id"] = user_id
+        if "device_id" in sig.parameters and device_id:
+            kwargs["device_id"] = device_id
+
+        return await func(*args, **kwargs)
 
     return wrapper
