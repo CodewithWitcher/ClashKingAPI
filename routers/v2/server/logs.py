@@ -1,8 +1,8 @@
 import hikari
 import linkd
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import List
+from typing import List, Annotated
 
 from utils.database import MongoClient
 from utils.security import check_authentication
@@ -600,6 +600,67 @@ async def update_clan_logs(
         "updated_log_types": request.log_types,
         "webhook_id": webhook_id,
         "thread_id": thread_id
+    }
+
+
+@router.delete("/{server_id}/clan/{clan_tag}/logs", name="Delete clan logs configuration")
+@linkd.ext.fastapi.inject
+@check_authentication
+async def delete_clan_logs(
+        server_id: int,
+        clan_tag: str,
+        log_types: Annotated[str, Query(description="Comma-separated list of log types to delete")],
+        user_id: str = None,
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+        *,
+        mongo: MongoClient
+) -> dict:
+    """
+    Delete clan logs configuration for specific log types.
+
+    This will remove the webhook and thread configuration for the specified log types.
+    The log types should be provided as a comma-separated string.
+
+    Example: log_types=join_log,leave_log,donation_log
+    """
+    # Normalize clan tag
+    if not clan_tag.startswith('#'):
+        clan_tag = f'#{clan_tag}'
+
+    # Parse comma-separated log types
+    log_types_list = [lt.strip() for lt in log_types.split(',')]
+
+    print(f"Looking for clan - tag: {clan_tag!r}, server: {server_id!r}")
+
+    # Find the clan in database
+    clan = await mongo.clan_db.find_one({"tag": clan_tag, "server": server_id})
+
+    if not clan:
+        raise HTTPException(status_code=404, detail=f"Clan {clan_tag} not found on this server")
+
+    # Build unset document to remove log configurations
+    unset_doc = {}
+    for log_type in log_types_list:
+        unset_doc[f"logs.{log_type}"] = ""
+
+    print(f"Deleting log types: {log_types_list}")
+    print(f"Unset operations: {unset_doc}")
+
+    # Delete clan logs configuration
+    result = await mongo.clan_db.update_one(
+        {"tag": clan_tag, "server": server_id},
+        {"$unset": unset_doc}
+    )
+
+    print(f"Delete result - matched: {result.matched_count}, modified: {result.modified_count}")
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Clan not found")
+
+    return {
+        "message": "Clan logs deleted successfully",
+        "clan_tag": clan_tag,
+        "deleted_log_types": log_types_list
     }
 
 
