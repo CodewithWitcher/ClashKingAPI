@@ -50,3 +50,25 @@ class ClanSettingsResponse(BaseModel):
     server_id: int
     clan_tag: str
     updated_fields: int
+
+
+class AddClanRequest(BaseModel):
+    """Request to add a clan to a server"""
+    tag: str = Field(..., description="Clan tag (with or without #)")
+    name: Optional[str] = Field(None, description="Clan name (fetched from API if not provided)")
+
+
+class AddClanResponse(BaseModel):
+    """Response after adding a clan"""
+    message: str
+    server_id: int
+    clan_tag: str
+    clan_name: str
+
+
+class RemoveClanResponse(BaseModel):
+    """Response after removing a clan"""
+    message: str
+    server_id: int
+    clan_tag: str
+    deleted_count: int

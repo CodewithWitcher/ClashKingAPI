@@ -2,8 +2,16 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from utils.security import check_authentication
 from utils.database import MongoClient
-from .clan_models import ClanSettingsUpdate, ClanSettingsResponse
+from utils.custom_coc import CustomClashClient
+from .clan_models import (
+    ClanSettingsUpdate,
+    ClanSettingsResponse,
+    AddClanRequest,
+    AddClanResponse,
+    RemoveClanResponse,
+)
 import linkd
+import coc
 
 security = HTTPBearer()
 router = APIRouter(prefix="/v2/server", tags=["Clan Settings"], include_in_schema=True)
@@ -91,4 +99,146 @@ async def update_clan_settings(
         server_id=server_id,
         clan_tag=clan_tag,
         updated_fields=len(update_doc)
+    )
+
+
+@router.post("/{server_id}/clans",
+             name="Add clan to server",
+             response_model=AddClanResponse)
+@linkd.ext.fastapi.inject
+@check_authentication
+async def add_clan(
+    server_id: int,
+    clan_request: AddClanRequest,
+    user_id: str = None,
+    request: Request = None,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    *,
+    mongo_client: MongoClient,
+    coc_client: CustomClashClient
+) -> AddClanResponse:
+    """
+    Add a clan to a server.
+
+    This endpoint:
+    - Validates the clan tag and fetches clan data from CoC API
+    - Checks if clan is already added to this server
+    - Inserts clan document with default settings
+    """
+    # Normalize clan tag
+    clan_tag = clan_request.tag
+    if not clan_tag.startswith('#'):
+        clan_tag = f'#{clan_tag}'
+
+    # Verify server exists
+    server = await mongo_client.server_db.find_one({"server": server_id})
+    if not server:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    # Check if clan already added to this server
+    existing = await mongo_client.clan_db.find_one({
+        "$and": [{"tag": clan_tag}, {"server": server_id}]
+    })
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Clan {clan_tag} is already added to this server"
+        )
+
+    # Fetch clan data from CoC API to validate it exists
+    try:
+        clan_data = await coc_client.get_clan(clan_tag)
+        clan_name = clan_data.name
+    except coc.NotFound:
+        raise HTTPException(status_code=404, detail=f"Clan {clan_tag} not found in Clash of Clans")
+    except Exception as e:
+        # Use provided name if API fetch fails
+        clan_name = clan_request.name or "Unknown Clan"
+
+    # Create clan document with default settings
+    clan_doc = {
+        "server": server_id,
+        "tag": clan_tag,
+        "name": clan_name,
+        "generalRole": None,
+        "leaderRole": None,
+        "clanChannel": None,
+        "category": None,
+        "abbreviation": "",
+        "greeting": "",
+        "auto_greet_option": "Never",
+        "leadership_eval": None,
+        "warCountdown": None,
+        "warTimerCountdown": None,
+        "ban_alert_channel": None,
+        "member_count_warning": {
+            "channel": None,
+            "above": None,
+            "below": None,
+            "role": None
+        },
+        "logs": {
+            "join_log": {"profile_button": False},
+            "leave_log": {"strike_button": False, "ban_button": False}
+        }
+    }
+
+    # Insert clan
+    result = await mongo_client.clan_db.insert_one(clan_doc)
+
+    return AddClanResponse(
+        message="Clan added successfully",
+        server_id=server_id,
+        clan_tag=clan_tag,
+        clan_name=clan_name
+    )
+
+
+@router.delete("/{server_id}/clans/{clan_tag}",
+               name="Remove clan from server",
+               response_model=RemoveClanResponse)
+@linkd.ext.fastapi.inject
+@check_authentication
+async def remove_clan(
+    server_id: int,
+    clan_tag: str,
+    user_id: str = None,
+    request: Request = None,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    *,
+    mongo_client: MongoClient
+) -> RemoveClanResponse:
+    """
+    Remove a clan from a server.
+
+    This endpoint:
+    - Deletes the clan document from the database
+    - Also deletes associated reminders, logs, and other clan-specific data
+    """
+    # Normalize clan tag
+    if not clan_tag.startswith('#'):
+        clan_tag = f'#{clan_tag}'
+
+    # Check if clan exists
+    existing = await mongo_client.clan_db.find_one({
+        "$and": [{"tag": clan_tag}, {"server": server_id}]
+    })
+    if not existing:
+        raise HTTPException(status_code=404, detail="Clan not found on this server")
+
+    # Delete clan document
+    result = await mongo_client.clan_db.delete_one({
+        "$and": [{"tag": clan_tag}, {"server": server_id}]
+    })
+
+    # Also delete associated reminders
+    await mongo_client.reminders.delete_many({
+        "$and": [{"clan": clan_tag}, {"server": server_id}]
+    })
+
+    return RemoveClanResponse(
+        message="Clan removed successfully",
+        server_id=server_id,
+        clan_tag=clan_tag,
+        deleted_count=result.deleted_count
     )
