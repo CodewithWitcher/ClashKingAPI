@@ -1,13 +1,15 @@
 from utils.utils import remove_id_fields
-from utils.database import MongoClient as mongo
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.security import HTTPBearer
+from utils.database import MongoClient as mongo, MongoClient
+from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from utils.security import check_authentication
 from utils.config import Config
+from .server_models import ServerSettingsUpdate, ServerSettingsResponse
+import linkd
 
 config = Config()
 security = HTTPBearer()
-router = APIRouter(prefix="/v2",tags=["Server Settings"], include_in_schema=True)
+router = APIRouter(prefix="/v2", tags=["Server Settings"], include_in_schema=True)
 
 
 @router.get("/server/{server_id}/settings",
@@ -66,3 +68,100 @@ async def set_server_embed_color(server_id: int, hex_code: int, request: Request
     if not result:
         raise HTTPException(status_code=404, detail="Server not found")
     return {"message": "Embed color updated", "server_id": server_id, "embed_color": hex_code}
+
+
+@router.patch("/server/{server_id}/settings",
+              name="Update server settings",
+              response_model=ServerSettingsResponse)
+@linkd.ext.fastapi.inject
+@check_authentication
+async def update_server_settings(
+    server_id: int,
+    settings: ServerSettingsUpdate,
+    user_id: str = None,
+    request: Request = None,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    *,
+    mongo_client: MongoClient
+) -> ServerSettingsResponse:
+    """
+    Update server settings. Only provided fields will be updated.
+
+    This endpoint handles all server-level settings including:
+    - Nickname conventions and auto-eval
+    - Role management (blacklist, treatment)
+    - Channel configurations (banlist, strike log, reddit feed)
+    - Link parsing settings
+    - General settings (leadership eval, tied stats, etc.)
+    """
+    # Verify server exists
+    existing = await mongo_client.server_db.find_one({"server": server_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    # Build update document with only provided fields
+    update_doc = {}
+
+    # Direct field mappings
+    field_mappings = {
+        "embed_color": "embed_color",
+        "nickname_rule": "nickname_rule",
+        "non_family_nickname_rule": "non_family_nickname_rule",
+        "change_nickname": "change_nickname",
+        "flair_non_family": "flair_non_family",
+        "auto_eval_nickname": "auto_eval_nickname",
+        "autoeval_triggers": "autoeval_triggers",
+        "autoeval_log": "autoeval_log",
+        "autoeval": "autoeval",
+        "blacklisted_roles": "blacklisted_roles",
+        "role_treatment": "role_treatment",
+        "full_whitelist_role": "full_whitelist_role",
+        "leadership_eval": "leadership_eval",
+        "autoboard_limit": "autoboard_limit",
+        "api_token": "api_token",
+        "tied": "tied",
+        "banlist": "banlist",
+        "strike_log": "strike_log",
+        "reddit_feed": "reddit_feed",
+        "family_label": "family_label",
+        "greeting": "greeting",
+    }
+
+    for pydantic_field, db_field in field_mappings.items():
+        value = getattr(settings, pydantic_field, None)
+        if value is not None:
+            update_doc[db_field] = value
+
+    # Handle nested link_parse settings
+    if settings.link_parse is not None:
+        link_parse_updates = {}
+        if settings.link_parse.clan is not None:
+            link_parse_updates["link_parse.clan"] = settings.link_parse.clan
+        if settings.link_parse.army is not None:
+            link_parse_updates["link_parse.army"] = settings.link_parse.army
+        if settings.link_parse.player is not None:
+            link_parse_updates["link_parse.player"] = settings.link_parse.player
+        if settings.link_parse.base is not None:
+            link_parse_updates["link_parse.base"] = settings.link_parse.base
+        if settings.link_parse.show is not None:
+            link_parse_updates["link_parse.show"] = settings.link_parse.show
+
+        update_doc.update(link_parse_updates)
+
+    if not update_doc:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    # Update the server
+    result = await mongo_client.server_db.update_one(
+        {"server": server_id},
+        {"$set": update_doc}
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Server not found")
+
+    return ServerSettingsResponse(
+        message="Server settings updated successfully",
+        server_id=server_id,
+        updated_fields=len(update_doc)
+    )
