@@ -1,5 +1,5 @@
 from utils.utils import remove_id_fields
-from utils.database import MongoClient as mongo, MongoClient
+from utils.database import MongoClient
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from utils.security import check_authentication
@@ -14,8 +14,15 @@ router = APIRouter(prefix="/v2", tags=["Server Settings"], include_in_schema=Tru
 
 @router.get("/server/{server_id}/settings",
              name="Get settings for a server")
+@linkd.ext.fastapi.inject
 @check_authentication
-async def server_settings(server_id: int, request: Request, clan_settings: bool = False):
+async def server_settings(
+    server_id: int,
+    request: Request,
+    clan_settings: bool = False,
+    *,
+    mongo: MongoClient
+):
     pipeline = [
         {"$match": {"server": server_id}},
         {"$lookup": {"from": "legendleagueroles", "localField": "server", "foreignField": "server",
@@ -48,8 +55,15 @@ async def server_settings(server_id: int, request: Request, clan_settings: bool 
 
 @router.get("/server/{server_id}/clan/{clan_tag}/settings",
             name="Update server discord embed color")
+@linkd.ext.fastapi.inject
 @check_authentication
-async def server_clan_settings(server_id: int, clan_tag: str, request: Request):
+async def server_clan_settings(
+    server_id: int,
+    clan_tag: str,
+    request: Request,
+    *,
+    mongo: MongoClient
+):
     result = await mongo.clan_db.find_one({'$and': [{'tag': clan_tag}, {'server': server_id}]})
     if not result:
         raise HTTPException(status_code=404, detail="Server or clan not found")
@@ -58,8 +72,15 @@ async def server_clan_settings(server_id: int, clan_tag: str, request: Request):
 
 @router.put("/server/{server_id}/embed-color/{hex_code}",
             name="Update server discord embed color")
+@linkd.ext.fastapi.inject
 @check_authentication
-async def set_server_embed_color(server_id: int, hex_code: int, request: Request):
+async def set_server_embed_color(
+    server_id: int,
+    hex_code: int,
+    request: Request,
+    *,
+    mongo: MongoClient
+):
     result = await mongo.server_db.find_one_and_update(
         {"server": server_id},
         {"$set": {"embed_color": hex_code}},
@@ -82,7 +103,7 @@ async def update_server_settings(
     request: Request = None,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo_client: MongoClient
+    mongo: MongoClient
 ) -> ServerSettingsResponse:
     """
     Update server settings. Only provided fields will be updated.
@@ -95,7 +116,7 @@ async def update_server_settings(
     - General settings (leadership eval, tied stats, etc.)
     """
     # Verify server exists
-    existing = await mongo_client.server_db.find_one({"server": server_id})
+    existing = await mongo.server_db.find_one({"server": server_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Server not found")
 
@@ -152,7 +173,7 @@ async def update_server_settings(
         raise HTTPException(status_code=400, detail="No fields to update")
 
     # Update the server
-    result = await mongo_client.server_db.update_one(
+    result = await mongo.server_db.update_one(
         {"server": server_id},
         {"$set": update_doc}
     )
