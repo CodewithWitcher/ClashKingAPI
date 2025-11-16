@@ -48,6 +48,7 @@ class MongoClient(AsyncMongoClient):
         self.__bot_settings = self.__static_client.get_database('usafam')
         self.server_db = self.__bot_settings.get_collection('server')
         self.clan_db = self.__bot_settings.get_collection('clans')
+        self.reminders = self.__bot_settings.get_collection('reminders')
 
 
 class OldMongoClient:

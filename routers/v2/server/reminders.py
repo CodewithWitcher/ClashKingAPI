@@ -43,14 +43,23 @@ async def get_server_reminders(
     roster_reminders = []
 
     for reminder in reminders:
+        # Handle different field names based on type (match ClashKingBot schema)
+        reminder_type = reminder.get("type")
+
+        # Get townhall filter - ClashKingBot uses 'townhalls' for Capital/Games, 'townhall_filter' for War/Inactivity
+        if reminder_type in ["Clan Capital", "Clan Games"]:
+            townhall_list = reminder.get("townhalls", [])
+        else:
+            townhall_list = reminder.get("townhall_filter", [])
+
         reminder_config = ReminderConfig(
             id=str(reminder.get("_id")),
-            type=reminder.get("type"),
+            type=reminder_type,
             clan_tag=reminder.get("clan"),
             channel_id=str(reminder.get("channel")) if reminder.get("channel") else None,
             time=reminder.get("time"),
             custom_text=reminder.get("custom_text", ""),
-            townhall_filter=reminder.get("townhall_filter", []),
+            townhall_filter=townhall_list,
             roles=reminder.get("roles", []),
             war_types=reminder.get("types", []),
             point_threshold=reminder.get("point_threshold"),
@@ -108,24 +117,25 @@ async def create_reminder(
         "custom_text": reminder.custom_text or "",
     }
 
-    # Add type-specific fields
+    # Add type-specific fields (match ClashKingBot schema)
     if reminder.type == "War":
         reminder_doc["types"] = reminder.war_types or ["Random", "Friendly", "CWL"]
         reminder_doc["townhall_filter"] = reminder.townhall_filter or []
         reminder_doc["roles"] = reminder.roles or []
     elif reminder.type == "Clan Capital":
         reminder_doc["attack_threshold"] = reminder.attack_threshold or 1
-        reminder_doc["townhall_filter"] = reminder.townhall_filter or []
+        reminder_doc["townhalls"] = reminder.townhall_filter or []  # ClashKingBot uses 'townhalls'
         reminder_doc["roles"] = reminder.roles or []
     elif reminder.type == "Clan Games":
         reminder_doc["point_threshold"] = reminder.point_threshold or 4000
-        reminder_doc["townhall_filter"] = reminder.townhall_filter or []
+        reminder_doc["townhalls"] = reminder.townhall_filter or []  # ClashKingBot uses 'townhalls'
         reminder_doc["roles"] = reminder.roles or []
     elif reminder.type == "Inactivity":
         reminder_doc["townhall_filter"] = reminder.townhall_filter or []
         reminder_doc["roles"] = reminder.roles or []
     elif reminder.type == "roster":
-        reminder_doc["roster"] = reminder.roster_id
+        from bson import ObjectId
+        reminder_doc["roster"] = ObjectId(reminder.roster_id) if reminder.roster_id else None
         reminder_doc["ping_type"] = reminder.ping_type or "All Roster Members"
 
     # Insert into database
@@ -164,7 +174,7 @@ async def update_reminder(
     if not existing:
         raise HTTPException(status_code=404, detail="Reminder not found")
 
-    # Build update document
+    # Build update document (match ClashKingBot schema)
     update_doc = {}
     if reminder.channel_id is not None:
         update_doc["channel"] = int(reminder.channel_id)
@@ -172,8 +182,15 @@ async def update_reminder(
         update_doc["time"] = reminder.time
     if reminder.custom_text is not None:
         update_doc["custom_text"] = reminder.custom_text
+
+    # Handle townhall filter based on type
     if reminder.townhall_filter is not None:
-        update_doc["townhall_filter"] = reminder.townhall_filter
+        reminder_type = existing.get("type")
+        if reminder_type in ["Clan Capital", "Clan Games"]:
+            update_doc["townhalls"] = reminder.townhall_filter  # ClashKingBot uses 'townhalls'
+        else:
+            update_doc["townhall_filter"] = reminder.townhall_filter
+
     if reminder.roles is not None:
         update_doc["roles"] = reminder.roles
     if reminder.war_types is not None:
