@@ -8,7 +8,6 @@ from utils.config import Config
 import pendulum as pend
 import inspect
 
-rest = hikari.RESTApp()
 config = Config()
 
 
@@ -16,6 +15,7 @@ def check_authentication(func):
     @wraps(func)
     async def wrapper(*args, **kwargs):
         mongo = kwargs.get('mongo')
+        rest = kwargs.get('rest')  # Get the injected REST instance
 
         credentials: HTTPAuthorizationCredentials = kwargs.get("credentials")
         if not credentials:
@@ -72,10 +72,10 @@ def check_authentication(func):
                 raise HTTPException(status_code=401, detail="User not found")
 
             if "server_id" in kwargs:
-                async with rest.acquire(token=token, token_type=hikari.TokenType.BEARER) as client:
+                async with rest.acquire(token=config.bot_token, token_type=hikari.TokenType.BOT) as client:
                     try:
-                        await client.fetch_guild(kwargs["server_id"])
-                    except hikari.errors.ClientHTTPResponseError:
+                        await client.fetch_member(kwargs["server_id"], user_id)
+                    except hikari.errors.NotFoundError:
                         raise HTTPException(status_code=401, detail="This user is not a member of this guild")
 
             sig = inspect.signature(func)
@@ -83,6 +83,7 @@ def check_authentication(func):
                 kwargs["user_id"] = user_id
             if "device_id" in sig.parameters and device_id:
                 kwargs["device_id"] = device_id
+
             return await func(*args, **kwargs)
 
         except Exception as e:

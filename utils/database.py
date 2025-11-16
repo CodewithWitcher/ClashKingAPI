@@ -24,6 +24,7 @@ class MongoClient(AsyncMongoClient):
             'roster_automation'
         )
         self.tokens_db = self.__clashking.get_collection('tokens')
+        self.autoboards = self.__clashking.get_collection('autoboards')
 
         self.__settings = self.get_database('settings')
         self.clans = self.__settings.get_collection('clans')
@@ -38,6 +39,15 @@ class MongoClient(AsyncMongoClient):
         self.auth_password_reset_tokens = self.__auth.get_collection(
             'password_reset_tokens'
         )
+
+        # Second connection for static_mongodb (bot settings)
+        self.__static_client = pymongo.AsyncMongoClient(
+            config.static_mongodb, compressors=['snappy', 'zlib']
+        )
+
+        self.__bot_settings = self.__static_client.get_database('usafam')
+        self.server_db = self.__bot_settings.get_collection('server')
+        self.clan_db = self.__bot_settings.get_collection('clans')
 
 
 class OldMongoClient:
@@ -150,7 +160,6 @@ class OldMongoClient:
     trials = bot_settings.get_collection('trials')
     autoboard_db = bot_settings.get_collection('autoboard_db')
     player_search = bot_settings.get_collection('player_search')
-
 
 cache = redis.Redis(
     host=config.redis_ip,

@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 class ServerSettingsUpdate(BaseModel):
     embed_color: Optional[str] = None

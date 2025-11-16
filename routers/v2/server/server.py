@@ -1,12 +1,13 @@
-
-from fastapi import HTTPException
-from fastapi import APIRouter, Request
-from utils.utils import remove_id_fields, check_authentication
+from utils.utils import remove_id_fields
 from utils.database import MongoClient as mongo
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.security import HTTPBearer
+from utils.security import check_authentication
+from utils.config import Config
 
-
+config = Config()
+security = HTTPBearer()
 router = APIRouter(prefix="/v2",tags=["Server Settings"], include_in_schema=True)
-
 
 
 @router.get("/server/{server_id}/settings",
@@ -65,8 +66,3 @@ async def set_server_embed_color(server_id: int, hex_code: int, request: Request
     if not result:
         raise HTTPException(status_code=404, detail="Server not found")
     return {"message": "Embed color updated", "server_id": server_id, "embed_color": hex_code}
-
-
-
-
-
