@@ -28,28 +28,88 @@ async def get_server_logs(
 ) -> ServerLogsConfig:
     """
     Get the complete logs configuration for a server.
-    Returns configuration for all log types.
+    Returns configuration for all log types aggregated from all clans.
     """
-    # Find server settings
-    server = await mongo.clan_db.find_one({"server": server_id})
-    if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
+    # Find all clans for this server
+    clans = await mongo.clan_db.find({"server": server_id}).to_list(length=None)
+    if not clans:
+        # Return empty config if no clans
+        return ServerLogsConfig()
 
-    # Extract logs configuration from server document
-    logs_config = server.get("logs", {})
-    print(logs_config)
+    # Map DB log names to API response names
+    log_mapping = {
+        "join_log": "join_leave_log",
+        "leave_log": "join_leave_log",  # Same as join_log
+        "donation_log": "donation_log",
+        "war_log": "war_log",
+        "capital_donations": "capital_donation_log",
+        "capital_attacks": "capital_raid_log",
+        "th_upgrade": "player_upgrade_log",
+        "troop_upgrade": "player_upgrade_log",
+        "hero_upgrade": "player_upgrade_log",
+        "spell_upgrade": "player_upgrade_log",
+        "hero_equipment_upgrade": "player_upgrade_log",
+        "legend_log_attacks": "legend_log",
+        "legend_log_defenses": "legend_log",
+    }
 
-    # Build response with all log types
+    # Aggregate logs by type
+    aggregated_logs = {}
+    for clan in clans:
+        clan_tag = clan.get("tag")
+        logs = clan.get("logs", {})
+        for db_log_name, api_log_name in log_mapping.items():
+            log_data = logs.get(db_log_name)
+            if not log_data or not log_data.get("webhook"):
+                continue
+            webhook_id = str(log_data.get("webhook"))
+            thread_id = str(log_data.get("thread")) if log_data.get("thread") else None
+            # Create a unique key for this log config (webhook + thread)
+            config_key = f"{webhook_id}_{thread_id}"
+            if api_log_name not in aggregated_logs:
+                aggregated_logs[api_log_name] = {}
+            if config_key not in aggregated_logs[api_log_name]:
+                aggregated_logs[api_log_name][config_key] = {
+                    "webhook": webhook_id,
+                    "thread": thread_id,
+                    "clans": []
+                }
+            # Add clan to this config
+            if clan_tag not in aggregated_logs[api_log_name][config_key]["clans"]:
+                aggregated_logs[api_log_name][config_key]["clans"].append(clan_tag)
+
+    # Convert to response format - use the first config for each log type
+    result = {}
+    for api_log_name, configs in aggregated_logs.items():
+        if configs:
+            # Take the first (most common) configuration
+            first_config = next(iter(configs.values()))
+            # Try to get channel ID from webhook
+            channel_id = None
+            try:
+                async with rest.acquire(token=config.bot_token, token_type=hikari.TokenType.BOT) as client:
+                    webhook = await client.fetch_webhook(int(first_config["webhook"]))
+                    channel_id = str(webhook.channel_id)
+            except:
+                pass
+            result[api_log_name] = LogConfig(
+                enabled=True,
+                channel=first_config["thread"] or channel_id,  # Use thread if set, otherwise webhook channel
+                thread=first_config["thread"],
+                webhook=first_config["webhook"],
+                clans=first_config["clans"]
+            )
+
     return ServerLogsConfig(
-        join_leave_log=_parse_log_config(logs_config.get("join_leave_log")),
-        donation_log=_parse_log_config(logs_config.get("donation_log")),
-        war_log=_parse_log_config(logs_config.get("war_log")),
-        capital_donation_log=_parse_log_config(logs_config.get("capital_donation_log")),
-        capital_raid_log=_parse_log_config(logs_config.get("capital_raid_log")),
-        player_upgrade_log=_parse_log_config(logs_config.get("player_upgrade_log")),
-        legend_log=_parse_log_config(logs_config.get("legend_log")),
-        ban_log=_parse_log_config(logs_config.get("ban_log")),
-        strike_log=_parse_log_config(logs_config.get("strike_log")),
+        join_leave_log=result.get("join_leave_log"),
+        donation_log=result.get("donation_log"),
+        war_log=result.get("war_log"),
+        capital_donation_log=result.get("capital_donation_log"),
+        capital_raid_log=result.get("capital_raid_log"),
+        player_upgrade_log=result.get("player_upgrade_log"),
+        legend_log=result.get("legend_log"),
+        ban_log=result.get("ban_log"),
+        strike_log=result.get("strike_log"),
     )
 
 
@@ -67,46 +127,92 @@ async def update_server_logs(
 ) -> dict:
     """
     Update the complete logs configuration for a server.
+    Updates webhook configurations in clan_db for selected clans.
     """
-    # Verify server exists
-    server = await mongo.server_db.find_one({"server": server_id})
-    if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
+    # Get all clans for this server
+    all_clans = await mongo.clan_db.find({"server": server_id}).to_list(length=None)
+    if not all_clans:
+        raise HTTPException(status_code=404, detail="No clans found for this server")
 
-    # Build update document
-    update_doc = {}
-    if logs_config.join_leave_log is not None:
-        update_doc["logs.join_leave_log"] = logs_config.join_leave_log.model_dump(exclude_none=True)
-    if logs_config.donation_log is not None:
-        update_doc["logs.donation_log"] = logs_config.donation_log.model_dump(exclude_none=True)
-    if logs_config.war_log is not None:
-        update_doc["logs.war_log"] = logs_config.war_log.model_dump(exclude_none=True)
-    if logs_config.capital_donation_log is not None:
-        update_doc["logs.capital_donation_log"] = logs_config.capital_donation_log.model_dump(exclude_none=True)
-    if logs_config.capital_raid_log is not None:
-        update_doc["logs.capital_raid_log"] = logs_config.capital_raid_log.model_dump(exclude_none=True)
-    if logs_config.player_upgrade_log is not None:
-        update_doc["logs.player_upgrade_log"] = logs_config.player_upgrade_log.model_dump(exclude_none=True)
-    if logs_config.legend_log is not None:
-        update_doc["logs.legend_log"] = logs_config.legend_log.model_dump(exclude_none=True)
-    if logs_config.ban_log is not None:
-        update_doc["logs.ban_log"] = logs_config.ban_log.model_dump(exclude_none=True)
-    if logs_config.strike_log is not None:
-        update_doc["logs.strike_log"] = logs_config.strike_log.model_dump(exclude_none=True)
+    # Map API log names to DB log names
+    api_to_db_mapping = {
+        "join_leave_log": ["join_log", "leave_log"],
+        "donation_log": ["donation_log"],
+        "war_log": ["war_log"],
+        "capital_donation_log": ["capital_donations"],
+        "capital_raid_log": ["capital_attacks"],
+        "player_upgrade_log": ["th_upgrade", "troop_upgrade", "hero_upgrade", "spell_upgrade", "hero_equipment_upgrade"],
+        "legend_log": ["legend_log_attacks", "legend_log_defenses"],
+    }
 
-    # Update database
-    result = await mongo.server_db.update_one(
-        {"server": server_id},
-        {"$set": update_doc}
-    )
+    updated_count = 0
 
-    if result.modified_count == 0 and result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Server not found")
+    # Process each log type
+    for api_log_name, config in logs_config.model_dump(exclude_none=True).items():
+        if config is None or not isinstance(config, dict):
+            continue
+        db_log_names = api_to_db_mapping.get(api_log_name, [])
+        if not db_log_names:
+            continue
+        enabled = config.get("enabled", False)
+        webhook_id = config.get("webhook")
+        thread_id = config.get("thread")
+        selected_clans = config.get("clans", [])
+
+        # If no webhook and enabled=False, disable logs for all clans
+        if not enabled or not webhook_id:
+            for db_log_name in db_log_names:
+                result = await mongo.clan_db.update_many(
+                    {"server": server_id},
+                    {"$set": {f"logs.{db_log_name}.webhook": None, f"logs.{db_log_name}.thread": None}}
+                )
+                updated_count += result.modified_count
+            continue
+
+        # Get webhook to create it if channel is provided but webhook isn't
+        if not webhook_id and config.get("channel"):
+            try:
+                channel_id = int(config["channel"])
+                async with rest.acquire(token=config.bot_token, token_type=hikari.TokenType.BOT) as client:
+                    # Create webhook for this channel
+                    webhook = await client.create_webhook(
+                        channel_id,
+                        name="ClashKing Logs",
+                        reason="Created by ClashKing Dashboard"
+                    )
+                    webhook_id = str(webhook.id)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to create webhook for channel {config.get('channel')}: {str(e)}"
+                )
+
+        # Update selected clans
+        for db_log_name in db_log_names:
+            if selected_clans:
+                # Update only selected clans
+                result = await mongo.clan_db.update_many(
+                    {"server": server_id, "tag": {"$in": selected_clans}},
+                    {"$set": {
+                        f"logs.{db_log_name}.webhook": int(webhook_id) if webhook_id else None,
+                        f"logs.{db_log_name}.thread": int(thread_id) if thread_id else None
+                    }}
+                )
+            else:
+                # Update all clans if none specified
+                result = await mongo.clan_db.update_many(
+                    {"server": server_id},
+                    {"$set": {
+                        f"logs.{db_log_name}.webhook": int(webhook_id) if webhook_id else None,
+                        f"logs.{db_log_name}.thread": int(thread_id) if thread_id else None
+                    }}
+                )
+            updated_count += result.modified_count
 
     return {
         "message": "Logs configuration updated successfully",
         "server_id": server_id,
-        "updated_logs": len(update_doc)
+        "updated_clans": updated_count
     }
 
 
@@ -162,6 +268,28 @@ async def update_log_type(
     }
 
 
+@router.get("/{server_id}/clans", name="Get server clans")
+@linkd.ext.fastapi.inject
+@check_authentication
+async def get_server_clans(
+        server_id: int,
+        user_id: str = None,
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+        *,
+        mongo: MongoClient,
+        rest: hikari.RESTApp
+) -> List[dict]:
+    """
+    Get all clans registered for a Discord server.
+    Returns basic clan information (tag and name).
+    """
+    clans = await mongo.clan_db.find(
+        {"server": server_id},
+        {"tag": 1, "name": 1, "_id": 0}
+    ).to_list(length=None)
+    return clans
+
+
 @router.get("/{server_id}/channels", name="Get server Discord channels")
 @linkd.ext.fastapi.inject
 @check_authentication
@@ -199,14 +327,12 @@ async def get_server_channels(
             # Include text channels, news channels, and voice channels
             if isinstance(channel, (hikari.GuildTextChannel, hikari.GuildNewsChannel)):
                 channel_type = "text" if isinstance(channel, hikari.GuildTextChannel) else "news"
-
                 # Get parent category name if exists
                 parent_name = None
                 if channel.parent_id:
                     parent_channel = next((c for c in channels if c.id == channel.parent_id), None)
                     if parent_channel and hasattr(parent_channel, 'name'):
                         parent_name = parent_channel.name
-
                 result.append(ChannelInfo(
                     id=str(channel.id),
                     name=channel.name,
@@ -217,7 +343,6 @@ async def get_server_channels(
 
         # Sort by parent category and then by name
         result.sort(key=lambda x: (x.parent_name or "", x.name))
-
         return result
 
     except HTTPException:

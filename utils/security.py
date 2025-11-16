@@ -72,11 +72,14 @@ def check_authentication(func):
                 raise HTTPException(status_code=401, detail="User not found")
 
             if "server_id" in kwargs:
-                async with rest.acquire(token=config.bot_token, token_type=hikari.TokenType.BOT) as client:
-                    try:
-                        await client.fetch_member(kwargs["server_id"], user_id)
-                    except hikari.errors.NotFoundError:
-                        raise HTTPException(status_code=401, detail="This user is not a member of this guild")
+                try:
+                    async with rest.acquire(token=config.bot_token, token_type=hikari.TokenType.BOT) as client:
+                        try:
+                            await client.fetch_member(kwargs["server_id"], user_id)
+                        except hikari.errors.NotFoundError:
+                            raise HTTPException(status_code=401, detail="This user is not a member of this guild")
+                except:
+                    raise HTTPException(status_code=500, detail="Failed to verify guild membership")
 
             sig = inspect.signature(func)
             if "user_id" in sig.parameters:
