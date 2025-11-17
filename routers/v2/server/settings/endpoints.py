@@ -4,8 +4,10 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from utils.security import check_authentication
 from utils.config import Config
-from .server_models import ServerSettingsUpdate, ServerSettingsResponse
+from utils.sentry_utils import capture_endpoint_errors
+from .models import ServerSettingsUpdate, ServerSettingsResponse
 import linkd
+import hikari
 
 config = Config()
 security = HTTPBearer()
@@ -16,12 +18,16 @@ router = APIRouter(prefix="/v2", tags=["Server Settings"], include_in_schema=Tru
              name="Get settings for a server")
 @linkd.ext.fastapi.inject
 @check_authentication
+@capture_endpoint_errors
 async def server_settings(
     server_id: int,
     request: Request,
     clan_settings: bool = False,
+    user_id: str = None,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient
+    mongo: MongoClient,
+    rest: hikari.RESTApp
 ):
     pipeline = [
         {"$match": {"server": server_id}},
@@ -54,15 +60,19 @@ async def server_settings(
 
 
 @router.get("/server/{server_id}/clan/{clan_tag}/settings",
-            name="Update server discord embed color")
+            name="Get clan settings for a server")
 @linkd.ext.fastapi.inject
 @check_authentication
+@capture_endpoint_errors
 async def server_clan_settings(
     server_id: int,
     clan_tag: str,
     request: Request,
+    user_id: str = None,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient
+    mongo: MongoClient,
+    rest: hikari.RESTApp
 ):
     result = await mongo.clan_db.find_one({'$and': [{'tag': clan_tag}, {'server': server_id}]})
     if not result:
@@ -74,12 +84,16 @@ async def server_clan_settings(
             name="Update server discord embed color")
 @linkd.ext.fastapi.inject
 @check_authentication
+@capture_endpoint_errors
 async def set_server_embed_color(
     server_id: int,
     hex_code: int,
     request: Request,
+    user_id: str = None,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient
+    mongo: MongoClient,
+    rest: hikari.RESTApp
 ):
     result = await mongo.server_db.find_one_and_update(
         {"server": server_id},
@@ -96,6 +110,7 @@ async def set_server_embed_color(
               response_model=ServerSettingsResponse)
 @linkd.ext.fastapi.inject
 @check_authentication
+@capture_endpoint_errors
 async def update_server_settings(
     server_id: int,
     settings: ServerSettingsUpdate,
