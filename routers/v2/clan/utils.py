@@ -1,6 +1,67 @@
 import statistics
+import pendulum as pend
 from collections import defaultdict, Counter
+from typing import Dict, Any, List, Optional
 import math
+
+# Constants
+PLAYER_TAGS_EMPTY = "player_tags cannot be empty"
+CLAN_TAGS_EMPTY = "clan_tags cannot be empty"
+ERROR_FETCHING_DATA = "Error fetching data"
+
+
+def create_join_leave_filters(
+    timestamp_start: int = 0,
+    time_stamp_end: int = 9999999999,
+    season: Optional[str] = None,
+    current_season: Optional[bool] = False,
+    limit: int = 50,
+    filter_leave_join_enabled: bool = False,
+    filter_join_leave_enabled: bool = False,
+    filter_time: Optional[int] = 86400,
+    only_type: Optional[str] = None,
+    townhall: Optional[List[int]] = None,
+    type: Optional[str] = None,
+    tag: Optional[List[str]] = None,
+    name_contains: Optional[str] = None
+):
+    """Create JoinLeaveQueryParams object from individual parameters.
+
+    Args:
+        timestamp_start: Start timestamp filter
+        time_stamp_end: End timestamp filter
+        season: Season filter (format YYYY-MM)
+        current_season: Filter for current season
+        limit: Maximum number of results
+        filter_leave_join_enabled: Enable leave-join filtering
+        filter_join_leave_enabled: Enable join-leave filtering
+        filter_time: Time window for filtering in seconds
+        only_type: Filter by join/leave pattern type
+        townhall: Filter by townhall levels
+        type: Filter by join or leave type
+        tag: Filter by player tags
+        name_contains: Filter by player name substring
+
+    Returns:
+        JoinLeaveQueryParams object
+    """
+    from routers.v2.clan.models import JoinLeaveQueryParams
+
+    return JoinLeaveQueryParams(
+        timestamp_start=timestamp_start,
+        time_stamp_end=time_stamp_end,
+        season=season,
+        current_season=current_season,
+        limit=limit,
+        filter_leave_join_enabled=filter_leave_join_enabled,
+        filter_join_leave_enabled=filter_join_leave_enabled,
+        filter_time=filter_time,
+        only_type=only_type,
+        townhall=townhall,
+        type=type,
+        tag=tag,
+        name_contains=name_contains
+    )
 
 
 def filter_leave_join(events: list, min_duration_seconds: int) -> list:
@@ -293,3 +354,305 @@ def predict_rewards(history: list):
             raid_season['offensiveReward'] = int(predicted_offensive_reward)
         if raid_season.get('defensiveReward', 0) == 0:
             raid_season['defensiveReward'] = int(predicted_defensive_reward)
+
+
+############################
+# New helper functions for endpoints refactoring
+############################
+
+def calculate_clan_games_points(clan_stats: Dict[str, Any], season: str, previous_season: str) -> int:
+    """Calculate total clan games points from current or previous season.
+
+    Args:
+        clan_stats: Clan statistics document
+        season: Current season identifier
+        previous_season: Previous season identifier
+
+    Returns:
+        Total clan games points
+    """
+    clan_games_points = 0
+
+    if not clan_stats:
+        return 0
+
+    for s in [season, previous_season]:
+        for tag, data in clan_stats.get(s, {}).items():
+            # Can be None sometimes, fallback to zero
+            clan_games_points += data.get('clan_games', 0) or 0
+        if clan_games_points != 0:
+            # If non-zero, CG has happened this season
+            break
+
+    return clan_games_points
+
+
+def calculate_donations(clan_stats: Dict[str, Any], season: str) -> Dict[str, int]:
+    """Calculate total donated and received troops for a season.
+
+    Args:
+        clan_stats: Clan statistics document
+        season: Season identifier
+
+    Returns:
+        Dict with total_donated and total_received
+    """
+    total_donated = 0
+    total_received = 0
+
+    if not clan_stats:
+        return {"total_donated": 0, "total_received": 0}
+
+    for tag, data in clan_stats.get(season, {}).items():
+        total_donated += data.get('donated', 0)
+        total_received += data.get('received', 0)
+
+    return {
+        "total_donated": total_donated,
+        "total_received": total_received
+    }
+
+
+def calculate_capital_donations(player_stats: List[Dict[str, Any]], raid_dates: List[str]) -> int:
+    """Calculate total capital gold donated across raid weeks.
+
+    Args:
+        player_stats: List of player statistics
+        raid_dates: List of raid date strings
+
+    Returns:
+        Total capital gold donated
+    """
+    donated_cc = 0
+
+    for date in raid_dates:
+        donated_cc += sum(
+            sum(player.get('capital_gold', {}).get(f'{date}', {}).get('donate', []))
+            for player in player_stats
+        )
+
+    return donated_cc
+
+
+def calculate_activity_stats(player_stats: List[Dict[str, Any]], season: str, previous_season: str) -> Dict[str, Any]:
+    """Calculate player activity statistics for the last 30 days and 48 hours.
+
+    Args:
+        player_stats: List of player statistics
+        season: Current season identifier
+        previous_season: Previous season identifier
+
+    Returns:
+        Dict with per_day average, last_48h count, and total score
+    """
+    now = pend.now(tz=pend.UTC)
+    thirty_days_ago = now.subtract(days=30)
+    forty_eight_hours_ago = now.subtract(hours=48)
+
+    time_add = defaultdict(set)
+    recent_active = set()
+
+    for player in player_stats:
+        for season_key in [season, previous_season]:
+            for timestamp in player.get('last_online_times', {}).get(season_key, []):
+                date = pend.from_timestamp(timestamp, tz=pend.UTC)
+
+                # Only keep dates within the last 30 days
+                if date >= thirty_days_ago:
+                    time_add[date.date()].add(player.get("tag"))
+
+                # Track players active in the last 48 hours
+                if date >= forty_eight_hours_ago:
+                    recent_active.add(player.get("tag"))
+
+    num_players_day = [len(players) for players in time_add.values()]
+    total_players = sum(num_players_day)
+    avg_players = int(total_players / len(num_players_day)) if num_players_day else 0
+    total_active_48h = len(recent_active)
+
+    return {
+        "per_day": avg_players,
+        "last_48h": total_active_48h,
+        "score": total_players
+    }
+
+
+def build_join_leave_query(
+    clan_tag: str,
+    timestamp_start: int,
+    time_stamp_end: int,
+    filters: Any
+) -> Dict[str, Any]:
+    """Build MongoDB query for join/leave events with filters.
+
+    Args:
+        clan_tag: Clan tag to filter
+        timestamp_start: Start timestamp
+        time_stamp_end: End timestamp
+        filters: JoinLeaveQueryParams object with additional filters
+
+    Returns:
+        MongoDB query dict
+    """
+    base_query = {
+        "$and": [
+            {"clan": clan_tag},
+            {"time": {"$gte": pend.from_timestamp(timestamp_start, tz=pend.UTC)}},
+            {"time": {"$lte": pend.from_timestamp(time_stamp_end, tz=pend.UTC)}}
+        ]
+    }
+
+    if hasattr(filters, 'type') and filters.type:
+        base_query["$and"].append({"type": filters.type})
+    if hasattr(filters, 'townhall') and filters.townhall:
+        base_query["$and"].append({"th": {"$in": filters.townhall}})
+    if hasattr(filters, 'tag') and filters.tag:
+        base_query["$and"].append({"tag": {"$in": filters.tag}})
+    if hasattr(filters, 'name_contains') and filters.name_contains:
+        base_query["$and"].append({"name": {"$regex": filters.name_contains, "$options": "i"}})
+
+    return base_query
+
+
+def apply_join_leave_filters(result: List[Dict[str, Any]], filters: Any) -> List[Dict[str, Any]]:
+    """Apply join/leave filters to results.
+
+    Args:
+        result: List of join/leave events
+        filters: JoinLeaveQueryParams with filter settings
+
+    Returns:
+        Filtered list of events
+    """
+    if hasattr(filters, 'filter_leave_join_enabled') and filters.filter_leave_join_enabled:
+        result = filter_leave_join(result, filters.filter_time)
+
+    if hasattr(filters, 'filter_join_leave_enabled') and filters.filter_join_leave_enabled:
+        result = filter_join_leave(result, filters.filter_time)
+
+    if hasattr(filters, 'only_type') and filters.only_type in ("join_leave", "leave_join"):
+        result = extract_join_leave_pairs(result, filters.filter_time, direction=filters.only_type)
+
+    return result
+
+
+def get_default_programmatic_filters() -> Dict[str, Any]:
+    """Get default filters for programmatic calls.
+
+    Returns:
+        Dict with default filter values
+    """
+    return {
+        "current_season": True,
+        "limit": 50,
+        "filter_leave_join_enabled": False,
+        "filter_join_leave_enabled": False,
+        "filter_time": 48,
+        "only_type": None,
+        "type": None,
+        "townhall": None,
+        "tag": None,
+        "name_contains": None
+    }
+
+
+def build_programmatic_join_leave_query(
+    clan_tag: str,
+    programmatic_filters: Dict[str, Any]
+) -> tuple[Dict[str, Any], int, int]:
+    """Build query for programmatic join/leave calls.
+
+    Args:
+        clan_tag: Clan tag
+        programmatic_filters: Dict with filter settings
+
+    Returns:
+        Tuple of (query dict, timestamp_start, timestamp_end)
+    """
+    from utils.time import season_start_end
+
+    # Determine time range
+    if programmatic_filters.get("current_season", True):
+        season_start, season_end = season_start_end(pend.now(tz=pend.UTC).format("YYYY-MM"))
+        timestamp_start = int(season_start.timestamp())
+        time_stamp_end = int(season_end.timestamp())
+    else:
+        timestamp_start = programmatic_filters.get("timestamp_start", 0)
+        time_stamp_end = programmatic_filters.get("time_stamp_end", 9999999999)
+
+    # Build base query
+    base_query: Dict[str, Any] = {
+        "$and": [
+            {"clan": clan_tag},
+            {"time": {"$gte": pend.from_timestamp(timestamp_start, tz=pend.UTC)}},
+            {"time": {"$lte": pend.from_timestamp(time_stamp_end, tz=pend.UTC)}}
+        ]
+    }
+
+    # Add optional filters
+    if programmatic_filters.get("type"):
+        base_query["$and"].append({"type": programmatic_filters["type"]})
+    if programmatic_filters.get("townhall"):
+        base_query["$and"].append({"th": {"$in": programmatic_filters["townhall"]}})
+    if programmatic_filters.get("tag"):
+        base_query["$and"].append({"tag": {"$in": programmatic_filters["tag"]}})
+    if programmatic_filters.get("name_contains"):
+        base_query["$and"].append({"name": {"$regex": programmatic_filters["name_contains"], "$options": "i"}})
+
+    return base_query, timestamp_start, time_stamp_end
+
+
+def apply_programmatic_filters(
+    result: List[Dict[str, Any]],
+    programmatic_filters: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Apply filters to results for programmatic calls.
+
+    Args:
+        result: List of join/leave events
+        programmatic_filters: Dict with filter settings
+
+    Returns:
+        Filtered list of events
+    """
+    if programmatic_filters.get("filter_leave_join_enabled"):
+        result = filter_leave_join(result, programmatic_filters.get("filter_time", 48))
+
+    if programmatic_filters.get("filter_join_leave_enabled"):
+        result = filter_join_leave(result, programmatic_filters.get("filter_time", 48))
+
+    only_type = programmatic_filters.get("only_type")
+    if only_type and only_type in ("join_leave", "leave_join"):
+        result = extract_join_leave_pairs(
+            result,
+            programmatic_filters.get("filter_time", 48),
+            direction=str(only_type)
+        )
+
+    return result
+
+
+def process_member_buckets(member: Any, tag_to_location: Dict[str, Dict]) -> Dict[str, Any]:
+    """Process a single clan member to extract bucket data.
+
+    Args:
+        member: Clan member object
+        tag_to_location: Dict mapping tags to location info
+
+    Returns:
+        Dict with member's contribution to buckets
+    """
+    buckets_update = {
+        "townhall": member.town_hall if member.town_hall != 0 else None,
+        "trophies": str((member.trophies // 1000) * 1000) if member.trophies >= 1000 else '100',
+        "role": member.role.in_game_name,
+        "league": member.league.name,
+        "location": None
+    }
+
+    if member.tag in tag_to_location:
+        location = tag_to_location[member.tag]
+        if location.get("country_code") is not None:
+            buckets_update["location"] = location.get("country_code")
+
+    return buckets_update

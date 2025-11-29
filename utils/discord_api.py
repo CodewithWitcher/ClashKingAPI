@@ -3,6 +3,7 @@ Discord API utilities for fetching server information.
 """
 
 import aiohttp
+import asyncio
 from typing import Dict, List, Optional
 
 from utils.config import Config
@@ -18,6 +19,10 @@ class DiscordAPI:
         self._channels_cache = {}
         self._roles_cache = {}
         self._emojis_cache = {}
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._rate_limit_lock = asyncio.Lock()
+        self._last_request_time = 0
+        self._min_request_interval = 0.5  # Minimum 500ms between requests
 
     async def get_channels(self, server_id: int, use_cache: bool = True) -> Dict:
         """
@@ -139,21 +144,73 @@ class DiscordAPI:
 
         return categorized_channels
 
-    async def _fetch_channels_from_api(self, server_id: int) -> List[Dict]:
-        """Fetch channels from Discord API."""
-        url = f'https://discord.com/api/v10/guilds/{server_id}/channels'
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create a reusable HTTP session."""
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def _make_request(self, url: str, max_retries: int = 3) -> dict:
+        """
+        Make a rate-limited HTTP request to Discord API with retry logic.
+
+        Args:
+            url: Discord API endpoint URL
+            max_retries: Maximum number of retry attempts
+
+        Returns:
+            JSON response from Discord API
+
+        Raises:
+            aiohttp.ClientError: If request fails after all retries
+        """
         headers = {
             'Authorization': f'Bot {self.config.bot_token}',
             'Content-Type': 'application/json'
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise aiohttp.ClientError(f'Discord API error {response.status}: {error_text}')
+        session = await self._get_session()
 
-                return await response.json()
+        for attempt in range(max_retries):
+            # Rate limiting: ensure minimum interval between requests
+            async with self._rate_limit_lock:
+                current_time = asyncio.get_event_loop().time()
+                time_since_last_request = current_time - self._last_request_time
+
+                if time_since_last_request < self._min_request_interval:
+                    await asyncio.sleep(self._min_request_interval - time_since_last_request)
+
+                self._last_request_time = asyncio.get_event_loop().time()
+
+            try:
+                async with session.get(url, headers=headers) as response:
+                    # Handle rate limiting
+                    if response.status == 429:
+                        retry_after = float(response.headers.get('Retry-After', 1))
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(retry_after)
+                            continue
+                        error_text = await response.text()
+                        raise aiohttp.ClientError(f'Discord API rate limit exceeded: {error_text}')
+
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise aiohttp.ClientError(f'Discord API error {response.status}: {error_text}')
+
+                    return await response.json()
+
+            except asyncio.TimeoutError:
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
+                    continue
+                raise aiohttp.ClientError('Discord API request timeout')
+
+        raise aiohttp.ClientError(f'Discord API request failed after {max_retries} retries')
+
+    async def _fetch_channels_from_api(self, server_id: int) -> List[Dict]:
+        """Fetch channels from Discord API."""
+        url = f'https://discord.com/api/v10/guilds/{server_id}/channels'
+        return await self._make_request(url)
 
 
     async def get_roles(self, server_id: int, use_cache: bool = True) -> List[Dict]:
@@ -175,18 +232,7 @@ class DiscordAPI:
             return self._roles_cache[server_id]
 
         url = f'https://discord.com/api/v10/guilds/{server_id}/roles'
-        headers = {
-            'Authorization': f'Bot {self.config.bot_token}',
-            'Content-Type': 'application/json'
-        }
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise aiohttp.ClientError(f'Discord API error {response.status}: {error_text}')
-
-                roles = await response.json()
+        roles = await self._make_request(url)
 
         # Format roles for easier use
         formatted_roles = []
@@ -227,18 +273,7 @@ class DiscordAPI:
             return self._emojis_cache[server_id]
 
         url = f'https://discord.com/api/v10/guilds/{server_id}/emojis'
-        headers = {
-            'Authorization': f'Bot {self.config.bot_token}',
-            'Content-Type': 'application/json'
-        }
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    raise aiohttp.ClientError(f'Discord API error {response.status}: {error_text}')
-
-                emojis = await response.json()
+        emojis = await self._make_request(url)
 
         # Cache the result
         self._emojis_cache[server_id] = emojis
@@ -259,6 +294,19 @@ class DiscordAPI:
             self._channels_cache.clear()
             self._roles_cache.clear()
             self._emojis_cache.clear()
+
+    async def close(self):
+        """Close the HTTP session."""
+        if self._session and not self._session.closed:
+            await self._session.close()
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.close()
 
 
 # Global instance for backwards compatibility and easy access

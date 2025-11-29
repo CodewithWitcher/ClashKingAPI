@@ -46,12 +46,19 @@ class MongoClient(AsyncMongoClient):
         self.clan_leaderboard_db = self.__new_looper.get_collection('clan_leaderboard_db')
         self.clan_stats = self.__new_looper.get_collection('clan_stats')
         self.legend_rankings = self.__new_looper.get_collection('legend_rankings')
+        self.player_history = self.__new_looper.get_collection('player_history')
+
+        # Cache database
+        self.__cache = self.get_database('cache')
+        self.capital_cache = self.__cache.get_collection('capital_raids')
+        self.capital = self.__cache.get_collection('capital_raids')  # Alias for v1 compatibility
 
         # Looper database (for war, raid, and tracking data)
         self.__looper = self.get_database('looper')
         self.history_db = self.__looper.get_collection('legend_history')
         self.clan_wars = self.__looper.get_collection('clan_war')
         self.clan_join_leave = self.__looper.get_collection('join_leave_history')
+        self.join_leave_history = self.__looper.get_collection('join_leave_history')  # Alias for v1 compatibility
         self.war_timers = self.__looper.get_collection('war_timer')
         self.new_player_stats = self.__looper.get_collection('player_stats')
         self.raid_weekend_db = self.__looper.get_collection('raid_weekends')
@@ -59,6 +66,7 @@ class MongoClient(AsyncMongoClient):
         self.cwl_groups = self.__looper.get_collection('cwl_group')
         self.war_elo = self.__looper.get_collection('war_elo')
         self.warhits = self.__looper.get_collection('warhits')
+        self.basic_clan = self.__looper.get_collection('clan_tags')
 
         # Second connection for static_mongodb (bot settings)
         self.__static_client = pymongo.AsyncMongoClient(

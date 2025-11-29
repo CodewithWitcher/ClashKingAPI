@@ -18,8 +18,8 @@ security = HTTPBearer()
 @check_authentication
 async def get_bans(
     server_id: int,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient
 ):
@@ -35,8 +35,8 @@ async def add_ban(
     server_id: int,
     player_tag: str,
     ban_data: BanRequest,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient
 ):
@@ -82,8 +82,8 @@ async def add_ban(
 async def remove_ban(
     server_id: int,
     player_tag: str,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient
 ):

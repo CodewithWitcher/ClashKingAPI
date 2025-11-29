@@ -2,11 +2,11 @@ import os
 import importlib.util
 import textwrap
 
-from routers.v2.link.link import router as accounts_router
-from routers.v2.auth.auth import router as auth_router
-from routers.v2.rosters.rosters import router as rosters_router
-from routers.v2.dates.dates import router as dates_router
-from routers.v2.war.war import router as war_router
+from routers.v2.accounts.endpoints import router as accounts_router
+from routers.v2.auth.endpoints import router as auth_router
+from routers.v2.rosters.endpoints import router as rosters_router
+from routers.v2.dates.endpoints import router as dates_router
+from routers.v2.war.endpoints import router as war_router
 from routers.v2.ui.ui import router as ui_router
 from routers.v2.config import router as config_router
 from routers.v2.server.settings.endpoints import router as server_router
@@ -19,10 +19,15 @@ from routers.v2.server.roles.endpoints import router as server_roles_router
 from routers.v2.server.guilds.endpoints import router as guilds_router, guild_router
 from routers.v2.server.strikes.endpoints import router as server_strikes_router
 from routers.v2.server.bans.endpoints import router as server_bans_router
-from routers.v2.server.leaderboards.endpoints import router as server_leaderboards_router
-from routers.v2.capital.capital import router as capital_router
-from routers.v2.activity.activity import router as activity_router
-from routers.v2.legends.legends import router as legends_router
+from routers.v2.capital.endpoints import router as capital_router
+from routers.v2.activity.endpoints import router as activity_router
+from routers.v2.legends.endpoints import router as legends_router
+from routers.v2.mobile.endpoints import router as mobile_router
+
+# V1 Routers
+from routers.v1.clan import router as v1_clan_router
+from routers.v1.capital import router as v1_capital_router
+
 from fastapi.openapi.utils import get_openapi
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -49,10 +54,14 @@ def define_app(app: FastAPI):
     app.include_router(server_roles_router)
     app.include_router(server_strikes_router)
     app.include_router(server_bans_router)
-    app.include_router(server_leaderboards_router)
     app.include_router(capital_router)
     app.include_router(activity_router)
     app.include_router(legends_router)
+    app.include_router(mobile_router)
+
+    # V1 Routers
+    app.include_router(v1_clan_router)
+    app.include_router(v1_capital_router)
 
     description = textwrap.dedent("""
     ### Clash of Clans Based API 👑

@@ -1,4 +1,3 @@
-import asyncio
 import sentry_sdk
 import uvicorn
 import contextlib
@@ -6,9 +5,7 @@ import coc
 import linkd
 import hikari
 import typing as t
-import pendulum as pend
 from sentry_sdk.integrations.fastapi import FastApiIntegration
-
 from startup import define_app
 import fastapi
 from fastapi import FastAPI
@@ -16,6 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.gzip import GZipMiddleware
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.inmemory import InMemoryBackend
 from utils.config import Config
 from utils.custom_coc import CustomClashClient
 from utils.database import MongoClient
@@ -63,24 +62,19 @@ registry.register_value(hikari.RESTApp, rest)
 
 @contextlib.asynccontextmanager
 async def lifespan(_: fastapi.FastAPI) -> t.AsyncGenerator[None, t.Any]:
-    # Login with CoC credentials
-    print(f"Attempting CoC login with email: {config.coc_email}")
 
     try:
-        await coc_client.login(email=config.coc_email, password=config.coc_password)
-        print("CoC client logged in successfully")
+        await coc_client.login_with_tokens('')
     except Exception as e:
-        print(f"Failed to login to CoC: {e}")
-        print(f"Exception type: {type(e)}")
         sentry_sdk.capture_exception(e, tags={"startup": "coc_login_failed"})
-        # Continue without CoC login for now
-        pass
+        raise
 
     try:
         await rest.start()
+        # Initialize FastAPI cache
+        FastAPICache.init(InMemoryBackend(), prefix="fastapi-cache")
         print("✅ Startup tasks completed successfully")
     except Exception as e:
-        print(f"❌ Startup error: {e}")
         sentry_sdk.capture_exception(e, tags={"startup": "failed"})
         raise
 

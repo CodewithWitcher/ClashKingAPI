@@ -1,5 +1,7 @@
 import re
+from typing import Union
 from fastapi import HTTPException
+from pydantic import EmailStr
 
 
 class PasswordValidator:
@@ -90,17 +92,18 @@ class PasswordValidator:
             )
 
     @staticmethod
-    def validate_email(email: str) -> None:
+    def validate_email(email: Union[str, EmailStr]) -> None:
         """Validate email format."""
         if not email:
             raise HTTPException(status_code=400, detail="Email is required")
 
+        email_str = str(email)
         # RFC 5322 compliant email regex (simplified)
         email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        if not re.match(email_pattern, email):
+        if not re.match(email_pattern, email_str):
             raise HTTPException(status_code=400, detail="Invalid email format")
 
-        if len(email) > 254:  # RFC 5321 limit
+        if len(email_str) > 254:  # RFC 5321 limit
             raise HTTPException(status_code=400, detail="Email address too long")
 
     @staticmethod

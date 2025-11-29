@@ -50,6 +50,8 @@ def fix_tag(tag: str) -> str:
         "#ABC123"
         >>> fix_tag(" 2pp ")
         "#2PP"
+        >>> fix_tag("!VY2J0LL")
+        "#VY2J0LL"
     """
     if not tag:
         return tag
@@ -57,8 +59,11 @@ def fix_tag(tag: str) -> str:
     # Remove whitespace
     tag = tag.strip()
 
+    # Replace ! with # if tag starts with !
+    if tag.startswith('!'):
+        tag = f'#{tag[1:]}'
     # Add # prefix if missing
-    if not tag.startswith('#'):
+    elif not tag.startswith('#'):
         tag = f'#{tag}'
 
     # Convert to uppercase

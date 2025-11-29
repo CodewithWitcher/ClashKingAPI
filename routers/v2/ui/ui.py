@@ -4,10 +4,9 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 import linkd.ext.fastapi
 from bson import ObjectId
-import json
 from datetime import datetime
-
-from utils.database import MongoClient, OldMongoClient
+from utils.database import MongoClient
+from routers.v2.rosters.utils import parse_th_restriction
 
 router = APIRouter(prefix='/ui', tags=['UI Pages'])
 templates = Jinja2Templates(directory="templates")
@@ -76,30 +75,6 @@ async def roster_dashboard(
         elif all_rosters:
             # Default to first roster if no roster_id specified
             current_roster = all_rosters[0]
-        
-        # Parse th_restriction to min_th/max_th for display
-        def parse_th_restriction(th_restriction):
-            """Parse th_restriction string to min_th and max_th values"""
-            if not th_restriction:
-                return None, None
-            
-            th_restriction = th_restriction.strip()
-            
-            if th_restriction.endswith('+'):
-                # Format: "12+" 
-                min_th = int(th_restriction[:-1])
-                return min_th, None
-            elif '-' in th_restriction:
-                # Format: "12-15" or "1-15"
-                parts = th_restriction.split('-')
-                min_th = int(parts[0]) if parts[0] != '1' else None
-                max_th = int(parts[1])
-                return min_th, max_th
-            else:
-                # Format: "12" (exact TH)
-                th = int(th_restriction)
-                return th, th
-        
         # Process th_restriction for current roster
         if current_roster:
             current_roster['min_th'], current_roster['max_th'] = parse_th_restriction(current_roster.get('th_restriction'))

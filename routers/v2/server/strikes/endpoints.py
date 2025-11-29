@@ -1,4 +1,4 @@
-import random
+import secrets
 import string
 import pendulum as pend
 from datetime import timedelta
@@ -9,7 +9,7 @@ import linkd
 from utils.database import MongoClient
 from utils.security import check_authentication
 from utils.utils import remove_id_fields
-from .models import StrikeRequest, StrikeResponse
+from .models import StrikeRequest
 
 router = APIRouter(prefix="/v2/server", tags=["Server Strikes"], include_in_schema=True)
 security = HTTPBearer()
@@ -23,8 +23,8 @@ async def get_strikes(
     server_id: int,
     player_tag: str = None,
     view_expired: bool = False,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient
 ):
@@ -35,6 +35,9 @@ async def get_strikes(
         server_id: Discord server ID
         player_tag: Optional player tag to filter strikes
         view_expired: Include expired strikes (default: False)
+        _user_id: Authenticated user ID (injected by decorator)
+        _credentials: HTTP bearer credentials (injected by FastAPI)
+        mongo: MongoDB client (injected by linkd)
 
     Returns:
         List of strikes
@@ -66,8 +69,8 @@ async def add_strike(
     server_id: int,
     player_tag: str,
     strike_data: StrikeRequest,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient
 ):
@@ -78,6 +81,9 @@ async def add_strike(
         server_id: Discord server ID
         player_tag: Player tag to strike
         strike_data: Strike details (reason, added_by, etc.)
+        _user_id: Authenticated user ID (injected by decorator)
+        _credentials: HTTP bearer credentials (injected by FastAPI)
+        mongo: MongoDB client (injected by linkd)
 
     Returns:
         Created strike information
@@ -85,14 +91,14 @@ async def add_strike(
     now = pend.now(tz=pend.UTC)
     dt_string = now.strftime('%Y-%m-%d %H:%M:%S')
 
-    # Generate unique strike ID
+    # Generate unique strike ID using cryptographically secure random
     source = string.ascii_letters
-    strike_id = str(''.join((random.choice(source) for i in range(5)))).upper()
+    strike_id = ''.join(secrets.choice(source) for _ in range(5)).upper()
 
     # Ensure uniqueness
     is_used = await mongo.strikelist.find_one({'strike_id': strike_id})
     while is_used is not None:
-        strike_id = str(''.join((random.choice(source) for i in range(5)))).upper()
+        strike_id = ''.join(secrets.choice(source) for _ in range(5)).upper()
         is_used = await mongo.strikelist.find_one({'strike_id': strike_id})
 
     # Calculate rollover date if specified
@@ -152,8 +158,8 @@ async def add_strike(
 async def remove_strike(
     server_id: int,
     strike_id: str,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient
 ):
@@ -163,6 +169,9 @@ async def remove_strike(
     Args:
         server_id: Discord server ID
         strike_id: Strike ID to remove
+        _user_id: Authenticated user ID (injected by decorator)
+        _credentials: HTTP bearer credentials (injected by FastAPI)
+        mongo: MongoDB client (injected by linkd)
 
     Returns:
         Deletion confirmation
@@ -206,8 +215,8 @@ async def remove_strike(
 async def get_player_strike_summary(
     server_id: int,
     player_tag: str,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient
 ):
@@ -217,6 +226,9 @@ async def get_player_strike_summary(
     Args:
         server_id: Discord server ID
         player_tag: Player tag
+        _user_id: Authenticated user ID (injected by decorator)
+        _credentials: HTTP bearer credentials (injected by FastAPI)
+        mongo: MongoDB client (injected by linkd)
 
     Returns:
         Strike summary with total count and weight

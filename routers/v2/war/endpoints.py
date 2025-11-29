@@ -7,13 +7,13 @@ from coc.utils import correct_tag
 import pendulum as pend
 from collections import defaultdict
 from fastapi import HTTPException
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from utils.utils import remove_id_fields
 from utils.database import MongoClient
 from utils.time import is_cwl
 
-from routers.v2.war.war_utils import (
+from routers.v2.war.utils import (
     calculate_war_stats,
     deconstruct_type,
     fetch_current_war_info_bypass,
@@ -23,10 +23,69 @@ from routers.v2.war.war_utils import (
     collect_player_hits_from_wars
 )
 from routers.v2.war.models import PlayerWarhitsFilter, ClanWarHitsFilter
-from routers.v2.clan.clan_models import ClanTagsRequest
+from routers.v2.clan.models import ClanTagsRequest
 from utils.utils import fix_tag
 
 router = APIRouter(prefix="/v2",tags=["War"], include_in_schema=True)
+
+# Constants
+TIMESTAMP_FORMAT = '%Y%m%dT%H%M%S.000Z'
+CLAN_TAG_FIELD = "data.clan.tag"
+PREP_START_TIME_FIELD = "data.preparationStartTime"
+MATCH_OPERATOR = "$match"
+UNSET_OPERATOR = "$unset"
+SORT_OPERATOR = "$sort"
+PROJECT_OPERATOR = "$project"
+DATA_FIELD = "$data"
+LIMIT_OPERATOR = "$limit"
+
+
+def _collect_war_tags(cwl_results: list) -> set:
+    """Collect all war tags from CWL results."""
+    all_war_tags = set()
+    for cwl_result in cwl_results:
+        rounds = cwl_result["data"].get("rounds", [])
+        for rnd in rounds:
+            for tag in rnd.get("warTags", []):
+                if tag:
+                    all_war_tags.add(tag)
+    return all_war_tags
+
+
+async def _build_war_lookup(mongo: MongoClient, war_tags: set) -> dict:
+    """Fetch war documents and build a lookup dictionary."""
+    if not war_tags:
+        return {}
+
+    matching_wars_data = await mongo.clan_wars.find({
+        "data.tag": {"$in": list(war_tags)}
+    },
+    {"data.clan.members": 0, "data.opponent.members": 0}
+    ).to_list(length=None)
+
+    return {w["data"]["tag"]: w["data"] for w in matching_wars_data}
+
+
+def _enrich_rounds_with_wars(rounds: list, war_lookup: dict, season: str) -> None:
+    """Replace war tags with war data for matching season."""
+    for rnd in rounds:
+        rnd["warTags"] = [
+            war_lookup.get(tag)
+            for tag in rnd.get("warTags", [])
+            if war_lookup.get(tag) and war_lookup.get(tag).get("season") == season
+        ]
+
+
+def _get_clan_ranking(ranking: list, clan_tag: str) -> dict:
+    """Get ranking data for specific clan tag."""
+    return next(
+        (
+            {'rank': idx, **item}
+            for idx, item in enumerate(ranking, start=1)
+            if item["tag"] == clan_tag
+        ),
+        None
+    )
 
 
 @router.get("/war/{clan_tag}/previous",
@@ -35,7 +94,6 @@ router = APIRouter(prefix="/v2",tags=["War"], include_in_schema=True)
 @linkd.ext.fastapi.inject
 async def war_previous(
         clan_tag: str,
-        request: Request = Request,
         timestamp_start: int = 0,
         timestamp_end: int = 9999999999,
         include_cwl: bool = False,
@@ -44,19 +102,19 @@ async def war_previous(
         mongo: MongoClient
 ):
     clan_tag = correct_tag(clan_tag)
-    START = pend.from_timestamp(timestamp_start, tz=pend.UTC).strftime('%Y%m%dT%H%M%S.000Z')
-    END = pend.from_timestamp(timestamp_end, tz=pend.UTC).strftime('%Y%m%dT%H%M%S.000Z')
+    start_time = pend.from_timestamp(timestamp_start, tz=pend.UTC).strftime(TIMESTAMP_FORMAT)
+    end_time = pend.from_timestamp(timestamp_end, tz=pend.UTC).strftime(TIMESTAMP_FORMAT)
 
     query = {
         "$and": [
-            {"$or": [{"data.clan.tag": clan_tag}, {"data.opponent.tag": clan_tag}]},
-            {"data.preparationStartTime": {"$gte": START}},
-            {"data.preparationStartTime": {"$lte": END}}
+            {"$or": [{CLAN_TAG_FIELD: clan_tag}, {"data.opponent.tag": clan_tag}]},
+            {PREP_START_TIME_FIELD: {"$gte": start_time}},
+            {PREP_START_TIME_FIELD: {"$lte": end_time}}
         ]
     }
 
     if not include_cwl:
-        query["$and"].append({"data.season": None})
+        query["$and"].append({"data.season": {"$eq": None}})
 
     full_wars = await mongo.clan_wars.find(query).sort("data.endTime", -1).limit(limit).to_list(length=None)
 
@@ -64,12 +122,12 @@ async def war_previous(
     found_ids = set()
     new_wars = []
     for war in full_wars:
-        id = war.get("data").get("preparationStartTime")
-        if id in found_ids:
+        prep_start_time = war.get("data").get("preparationStartTime")
+        if prep_start_time in found_ids:
             continue
         war.pop("_response_retry", None)
         new_wars.append(war.get("data"))
-        found_ids.add(id)
+        found_ids.add(prep_start_time)
 
     return remove_id_fields({"items" : new_wars})
 
@@ -80,14 +138,13 @@ async def war_previous(
 @linkd.ext.fastapi.inject
 async def cwl_ranking_history(
         clan_tag: str,
-        request: Request,
         *,
         mongo: MongoClient
 ):
     clan_tag = correct_tag(clan_tag)
 
     # Fetch all CWL group documents containing the clan
-    results = await mongo.cwl_groups.find({"data.clans.tag": clan_tag}, {"data.clans" : 0}).to_list(length=None)
+    results = await mongo.cwl_groups.find({"data.clans.tag": clan_tag}, {"data.clans": 0}).to_list(length=None)
     if not results:
         raise HTTPException(status_code=404, detail="No CWL Data Found")
 
@@ -95,54 +152,24 @@ async def cwl_ranking_history(
     clan_data = await mongo.basic_clan.find_one({"tag": clan_tag}, {"changes.clanWarLeague": 1})
     cwl_changes = clan_data.get("changes", {}).get("clanWarLeague", {})
 
-    # Collect all war tags across all CWL results (across all seasons)
-    all_war_tags = set()
-    for cwl_result in results:
-        rounds = cwl_result["data"].get("rounds", [])
-        for rnd in rounds:
-            for tag in rnd.get("warTags", []):
-                if tag:
-                    all_war_tags.add(tag)
-
-    # Fetch all war documents in one go using the union of war tags
-    if all_war_tags:
-        matching_wars_data = await mongo.clan_wars.find({
-            "data.tag": {"$in": list(all_war_tags)}
-        },
-        {"data.clan.members" : 0, "data.opponent.members" : 0}
-        ).to_list(length=None)
-        # Build a lookup dictionary keyed by war tag
-        war_lookup = {w["data"]["tag"]: w["data"] for w in matching_wars_data}
-    else:
-        war_lookup = {}
+    # Collect all war tags and build war lookup
+    all_war_tags = _collect_war_tags(results)
+    war_lookup = await _build_war_lookup(mongo, all_war_tags)
 
     ranking_results = []
     for cwl_result in results:
         season = cwl_result["data"].get("season")
         rounds = cwl_result["data"].get("rounds", [])
 
-        # Replace each war tag with the corresponding war data,
-        # but only include wars that match the current season.
-        for rnd in rounds:
-            rnd["warTags"] = [
-                war_lookup.get(tag)
-                for tag in rnd.get("warTags", [])
-                if war_lookup.get(tag) and war_lookup.get(tag).get("season") == season
-            ]
+        # Enrich rounds with war data
+        _enrich_rounds_with_wars(rounds, war_lookup, season)
 
         cwl_data = cwl_result["data"]
         cwl_data["rounds"] = rounds
         ranking = ranking_create(data=cwl_data)
 
-        # Get the ranking for our clan tag along with its index (place)
-        ranking_data = next(
-            (
-                {'rank': idx, **item}
-                for idx, item in enumerate(ranking, start=1)
-                if item["tag"] == clan_tag
-            ),
-            None
-        )
+        # Get the ranking for our clan tag
+        ranking_data = _get_clan_ranking(ranking, clan_tag)
         if ranking_data is None:
             continue
 
@@ -163,9 +190,7 @@ async def cwl_ranking_history(
 
 @router.get("/cwl/league-thresholds",
             name="Promo and demotion thresholds for CWL leagues")
-async def cwl_league_thresholds(
-        request: Request
-):
+async def cwl_league_thresholds():
     return {
       "items": [
         {
@@ -342,7 +367,6 @@ def ranking_create(data: dict):
 @router.get("/war/clan/stats")
 @linkd.ext.fastapi.inject
 async def clan_war_stats(
-        request: Request,
         clan_tags: list[str] = Query(..., min_length=1),
         timestamp_start: int = 0,
         timestamp_end: int = 9999999999,
@@ -354,26 +378,26 @@ async def clan_war_stats(
 ):
     clan_tags = [correct_tag(tag=tag) for tag in clan_tags]
 
-    START = pend.from_timestamp(timestamp_start, tz=pend.UTC).strftime('%Y%m%dT%H%M%S.000Z')
-    END = pend.from_timestamp(timestamp_end, tz=pend.UTC).strftime('%Y%m%dT%H%M%S.000Z')
+    start_time = pend.from_timestamp(timestamp_start, tz=pend.UTC).strftime(TIMESTAMP_FORMAT)
+    end_time = pend.from_timestamp(timestamp_end, tz=pend.UTC).strftime(TIMESTAMP_FORMAT)
 
     first_match = {"$or": [{"data.clan.tag": {"$in" : clan_tags}}, {"data.opponent.tag": {"$in" : clan_tags}}]}
 
     query = {
         "$and": [
             first_match,
-            {"data.preparationStartTime": {"$gte": START}},
-            {"data.preparationStartTime": {"$lte": END}}
+            {PREP_START_TIME_FIELD: {"$gte": start_time}},
+            {PREP_START_TIME_FIELD: {"$lte": end_time}}
         ]
     }
 
 
     pipeline = [
-        {"$match": query},
-        {"$unset": ["_id"]},
-        {"$sort": {"endTime": -1}},
-        {"$project": {"data": "$data"}},
-        {"$limit": limit}
+        {MATCH_OPERATOR: query},
+        {UNSET_OPERATOR: ["_id"]},
+        {SORT_OPERATOR: {"endTime": -1}},
+        {PROJECT_OPERATOR: {"data": DATA_FIELD}},
+        {LIMIT_OPERATOR: limit}
     ]
 
     if war_types != 7:
@@ -388,7 +412,7 @@ async def clan_war_stats(
         if 4 in war_types:
             check.append({"data.tag": {"$ne": None}})
 
-        pipeline.insert(1, {"$match" : {"$or": check}})
+        pipeline.insert(1, {MATCH_OPERATOR: {"$or": check}})
 
     cursor = await mongo.clan_wars.aggregate(pipeline, allowDiskUse=True)
     wars = await cursor.to_list(length=None)
@@ -400,7 +424,7 @@ async def clan_war_stats(
 
 
 @router.post("/war/war-summary", name="Get full war and CWL summary for multiple clans")
-async def get_multiple_clan_war_summary(body: ClanTagsRequest, request: Request):
+async def get_multiple_clan_war_summary(body: ClanTagsRequest):
     if not body.clan_tags:
         raise HTTPException(status_code=400, detail="clan_tags cannot be empty")
 
@@ -461,28 +485,28 @@ async def get_clan_war_summary(clan_tag: str):
 
 @router.post("/war/players/warhits")
 @linkd.ext.fastapi.inject
-async def players_warhits_stats(filter: PlayerWarhitsFilter, request: Request, *, mongo: MongoClient):
+async def players_warhits_stats(war_filter: PlayerWarhitsFilter, *, mongo: MongoClient):
     client = coc.Client(raw_attribute=True)
-    START = pend.from_timestamp(filter.timestamp_start, tz=pend.UTC).strftime('%Y%m%dT%H%M%S.000Z')
-    END = pend.from_timestamp(filter.timestamp_end, tz=pend.UTC).strftime('%Y%m%dT%H%M%S.000Z')
+    start_time = pend.from_timestamp(war_filter.timestamp_start, tz=pend.UTC).strftime(TIMESTAMP_FORMAT)
+    end_time = pend.from_timestamp(war_filter.timestamp_end, tz=pend.UTC).strftime(TIMESTAMP_FORMAT)
 
     async def fetch_player(tag: str):
         player_tag = fix_tag(tag)
         pipeline = [
-            {"$match": {
+            {MATCH_OPERATOR: {
                 "$and": [
                     {"$or": [
                         {"data.clan.members.tag": player_tag},
                         {"data.opponent.members.tag": player_tag}
                     ]},
-                    {"data.preparationStartTime": {"$gte": START}},
-                    {"data.preparationStartTime": {"$lte": END}}
+                    {PREP_START_TIME_FIELD: {"$gte": start_time}},
+                    {PREP_START_TIME_FIELD: {"$lte": end_time}}
                 ]
             }},
-            {"$sort": {"data.preparationStartTime": -1}},
-            {"$limit": filter.limit or 50},
-            {"$unset": ["_id"]},
-            {"$project": {"data": "$data"}},
+            {SORT_OPERATOR: {PREP_START_TIME_FIELD: -1}},
+            {LIMIT_OPERATOR: war_filter.limit or 50},
+            {UNSET_OPERATOR: ["_id"]},
+            {PROJECT_OPERATOR: {"data": DATA_FIELD}},
         ]
 
         cursor = await mongo.clan_wars.aggregate(pipeline, allowDiskUse=True)
@@ -492,12 +516,12 @@ async def players_warhits_stats(filter: PlayerWarhitsFilter, request: Request, *
             wars_docs,
             tags_to_include=[player_tag],
             clan_tags=None,
-            filter=filter,
+            filter=war_filter,
             client=client
         )
         return result["items"]
 
-    player_tasks = [fetch_player(tag) for tag in filter.player_tags]
+    player_tasks = [fetch_player(tag) for tag in war_filter.player_tags]
     results_per_player = await asyncio.gather(*player_tasks)
     results = [item for sublist in results_per_player for item in sublist]  # flatten
 
@@ -506,22 +530,22 @@ async def players_warhits_stats(filter: PlayerWarhitsFilter, request: Request, *
 
 @router.post("/war/clans/warhits")
 @linkd.ext.fastapi.inject
-async def clan_warhits_stats(filter: ClanWarHitsFilter, request: Request, *, mongo: MongoClient):
+async def clan_warhits_stats(war_filter: ClanWarHitsFilter, *, mongo: MongoClient):
     client = coc.Client(raw_attribute=True)
-    START = pend.from_timestamp(filter.timestamp_start, tz=pend.UTC).strftime('%Y%m%dT%H%M%S.000Z')
-    END = pend.from_timestamp(filter.timestamp_end, tz=pend.UTC).strftime('%Y%m%dT%H%M%S.000Z')
-    clan_tags = [fix_tag(tag) for tag in filter.clan_tags]
+    start_time = pend.from_timestamp(war_filter.timestamp_start, tz=pend.UTC).strftime(TIMESTAMP_FORMAT)
+    end_time = pend.from_timestamp(war_filter.timestamp_end, tz=pend.UTC).strftime(TIMESTAMP_FORMAT)
+    clan_tags = [fix_tag(tag) for tag in war_filter.clan_tags]
 
     async def fetch_clan(clan_tag: str):
         pipeline = [
-            {"$match": {
-                "data.clan.tag": clan_tag,
-                "data.preparationStartTime": {"$gte": START, "$lte": END}
+            {MATCH_OPERATOR: {
+                CLAN_TAG_FIELD: clan_tag,
+                PREP_START_TIME_FIELD: {"$gte": start_time, "$lte": end_time}
             }},
-            {"$unset": ["_id"]},
-            {"$project": {"data": "$data"}},
-            {"$sort": {"data.preparationStartTime": -1}},
-            {"$limit": filter.limit or 100},
+            {UNSET_OPERATOR: ["_id"]},
+            {PROJECT_OPERATOR: {"data": DATA_FIELD}},
+            {SORT_OPERATOR: {PREP_START_TIME_FIELD: -1}},
+            {LIMIT_OPERATOR: war_filter.limit or 100},
         ]
 
         cursor = await mongo.clan_wars.aggregate(pipeline, allowDiskUse=True)
@@ -531,7 +555,7 @@ async def clan_warhits_stats(filter: ClanWarHitsFilter, request: Request, *, mon
             wars_docs,
             tags_to_include=None,
             clan_tags=[clan_tag],
-            filter=filter,
+            filter=war_filter,
             client=client,
         )
 

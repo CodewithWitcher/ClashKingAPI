@@ -15,15 +15,16 @@ def check_authentication(func):
     @wraps(func)
     async def wrapper(*args, **kwargs):
         mongo = kwargs.get('mongo')
-        rest = kwargs.get('rest')  # Get injected REST (only needed if server_id in kwargs)
+        rest = kwargs.get('rest') or kwargs.get('_rest')  # Get injected REST (only needed if server_id in kwargs)
 
-        credentials: HTTPAuthorizationCredentials = kwargs.get("credentials")
+        credentials: HTTPAuthorizationCredentials = kwargs.get("credentials") or kwargs.get("_credentials")
         if not credentials:
             # In local mode, allow bypass without authentication for development
             if config.is_local:
                 sig = inspect.signature(func)
-                if "user_id" in sig.parameters:
-                    kwargs["user_id"] = os.getenv("DEV_USER_ID")
+                if "user_id" in sig.parameters or "_user_id" in sig.parameters:
+                    user_id_key = "user_id" if "user_id" in sig.parameters else "_user_id"
+                    kwargs[user_id_key] = os.getenv("DEV_USER_ID")
                 return await func(*args, **kwargs)
             raise HTTPException(status_code=403, detail="Authentication token missing")
 
@@ -46,9 +47,10 @@ def check_authentication(func):
 
 
             sig = inspect.signature(func)
-            if "user_id" in sig.parameters:
+            if "user_id" in sig.parameters or "_user_id" in sig.parameters:
                 # on force un user_id factice lié au server
-                kwargs["user_id"] = f"server:{token_doc['server_id']}"
+                user_id_key = "user_id" if "user_id" in sig.parameters else "_user_id"
+                kwargs[user_id_key] = f"server:{token_doc['server_id']}"
             if "server_id" in sig.parameters and "server_id" not in kwargs:
                 kwargs["server_id"] = token_doc["server_id"]
 
@@ -82,8 +84,9 @@ def check_authentication(func):
                     raise HTTPException(status_code=401, detail="This user is not a member of this guild")
 
         sig = inspect.signature(func)
-        if "user_id" in sig.parameters:
-            kwargs["user_id"] = user_id
+        if "user_id" in sig.parameters or "_user_id" in sig.parameters:
+            user_id_key = "user_id" if "user_id" in sig.parameters else "_user_id"
+            kwargs[user_id_key] = user_id
         if "device_id" in sig.parameters and device_id:
             kwargs["device_id"] = device_id
 

@@ -11,7 +11,7 @@ class AutoBoardConfig(BaseModel):
     webhook_id: str
     thread_id: Optional[str] = None
     channel_id: Optional[str] = None
-    days: Optional[List[str]] = None  # For auto-post: ["monday", "friday", etc]
+    days: Optional[List[str]] = None  # For auto-post: ["monday", "friday", etc.]
     locale: Optional[str] = "en-US"
     created_at: Optional[str] = None
 

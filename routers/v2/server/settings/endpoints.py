@@ -7,11 +7,77 @@ from utils.config import Config
 from utils.sentry_utils import capture_endpoint_errors
 from .models import ServerSettingsUpdate, ServerSettingsResponse
 import linkd
-import hikari
 
 config = Config()
 security = HTTPBearer()
 router = APIRouter(prefix="/v2", tags=["Server Settings"], include_in_schema=True)
+
+# Constants
+LOOKUP_OPERATOR = "$lookup"
+SERVER_NOT_FOUND = "Server not found"
+
+
+def _build_server_aggregation_pipeline(server_id: int, include_clans: bool = True) -> list:
+    """
+    Build MongoDB aggregation pipeline for fetching server settings with role lookups.
+
+    Args:
+        server_id: The Discord server ID
+        include_clans: Whether to include clan data in the pipeline
+
+    Returns:
+        List of aggregation pipeline stages
+    """
+    pipeline = [
+        {"$match": {"server": server_id}},
+        {LOOKUP_OPERATOR: {"from": "legendleagueroles", "localField": "server", "foreignField": "server",
+                     "as": "eval.league_roles"}},
+        {LOOKUP_OPERATOR: {"from": "evalignore", "localField": "server", "foreignField": "server",
+                     "as": "eval.ignored_roles"}},
+        {LOOKUP_OPERATOR: {"from": "generalrole", "localField": "server", "foreignField": "server",
+                     "as": "eval.family_roles"}},
+        {LOOKUP_OPERATOR: {"from": "linkrole", "localField": "server", "foreignField": "server",
+                     "as": "eval.not_family_roles"}},
+        {LOOKUP_OPERATOR: {"from": "townhallroles", "localField": "server", "foreignField": "server",
+                     "as": "eval.townhall_roles"}},
+        {LOOKUP_OPERATOR: {"from": "builderhallroles", "localField": "server", "foreignField": "server",
+                     "as": "eval.builderhall_roles"}},
+        {LOOKUP_OPERATOR: {"from": "achievementroles", "localField": "server", "foreignField": "server",
+                     "as": "eval.achievement_roles"}},
+        {LOOKUP_OPERATOR: {"from": "statusroles", "localField": "server", "foreignField": "server",
+                     "as": "eval.status_roles"}},
+        {LOOKUP_OPERATOR: {"from": "builderleagueroles", "localField": "server", "foreignField": "server",
+                     "as": "eval.builder_league_roles"}},
+    ]
+
+    if include_clans:
+        pipeline.append({LOOKUP_OPERATOR: {"from": "clans", "localField": "server", "foreignField": "server", "as": "clans"}})
+
+    return pipeline
+
+
+def _build_link_parse_updates(link_parse) -> dict:
+    """
+    Build link_parse field updates from the link_parse settings object.
+
+    Args:
+        link_parse: LinkParseSettings object with nested settings
+
+    Returns:
+        Dictionary with dotted field names for MongoDB update
+    """
+    link_parse_updates = {}
+    if link_parse.clan is not None:
+        link_parse_updates["link_parse.clan"] = link_parse.clan
+    if link_parse.army is not None:
+        link_parse_updates["link_parse.army"] = link_parse.army
+    if link_parse.player is not None:
+        link_parse_updates["link_parse.player"] = link_parse.player
+    if link_parse.base is not None:
+        link_parse_updates["link_parse.base"] = link_parse.base
+    if link_parse.show is not None:
+        link_parse_updates["link_parse.show"] = link_parse.show
+    return link_parse_updates
 
 
 @router.get("/server/{server_id}/settings",
@@ -21,38 +87,13 @@ router = APIRouter(prefix="/v2", tags=["Server Settings"], include_in_schema=Tru
 @capture_endpoint_errors
 async def server_settings(
     server_id: int,
-    request: Request,
     clan_settings: bool = False,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient,
-    rest: hikari.RESTApp
+    mongo: MongoClient
 ):
-    pipeline = [
-        {"$match": {"server": server_id}},
-        {"$lookup": {"from": "legendleagueroles", "localField": "server", "foreignField": "server",
-                     "as": "eval.league_roles"}},
-        {"$lookup": {"from": "evalignore", "localField": "server", "foreignField": "server",
-                     "as": "eval.ignored_roles"}},
-        {"$lookup": {"from": "generalrole", "localField": "server", "foreignField": "server",
-                     "as": "eval.family_roles"}},
-        {"$lookup": {"from": "linkrole", "localField": "server", "foreignField": "server",
-                     "as": "eval.not_family_roles"}},
-        {"$lookup": {"from": "townhallroles", "localField": "server", "foreignField": "server",
-                     "as": "eval.townhall_roles"}},
-        {"$lookup": {"from": "builderhallroles", "localField": "server", "foreignField": "server",
-                     "as": "eval.builderhall_roles"}},
-        {"$lookup": {"from": "achievementroles", "localField": "server", "foreignField": "server",
-                     "as": "eval.achievement_roles"}},
-        {"$lookup": {"from": "statusroles", "localField": "server", "foreignField": "server",
-                     "as": "eval.status_roles"}},
-        {"$lookup": {"from": "builderleagueroles", "localField": "server", "foreignField": "server",
-                     "as": "eval.builder_league_roles"}},
-        {"$lookup": {"from": "clans", "localField": "server", "foreignField": "server", "as": "clans"}},
-    ]
-    if not clan_settings:
-        pipeline.pop(-1)
+    pipeline = _build_server_aggregation_pipeline(server_id, include_clans=clan_settings)
     cursor = await mongo.server_db.aggregate(pipeline)
     results = await cursor.to_list(length=1)
     if not results:
@@ -68,12 +109,10 @@ async def server_settings(
 async def server_clan_settings(
     server_id: int,
     clan_tag: str,
-    request: Request,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient,
-    rest: hikari.RESTApp
+    mongo: MongoClient
 ):
     result = await mongo.clan_db.find_one({'$and': [{'tag': clan_tag}, {'server': server_id}]})
     if not result:
@@ -89,12 +128,10 @@ async def server_clan_settings(
 async def set_server_embed_color(
     server_id: int,
     hex_code: int,
-    request: Request,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient,
-    rest: hikari.RESTApp
+    mongo: MongoClient
 ):
     result = await mongo.server_db.find_one_and_update(
         {"server": server_id},
@@ -102,7 +139,7 @@ async def set_server_embed_color(
         return_document=True
     )
     if not result:
-        raise HTTPException(status_code=404, detail="Server not found")
+        raise HTTPException(status_code=404, detail=SERVER_NOT_FOUND)
     return {"message": "Embed color updated", "server_id": server_id, "embed_color": hex_code}
 
 
@@ -115,9 +152,9 @@ async def set_server_embed_color(
 async def update_server_settings(
     server_id: int,
     settings: ServerSettingsUpdate,
-    user_id: str = None,
-    request: Request = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _request: Request = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient
 ) -> ServerSettingsResponse:
@@ -134,7 +171,7 @@ async def update_server_settings(
     # Verify server exists
     existing = await mongo.server_db.find_one({"server": server_id})
     if not existing:
-        raise HTTPException(status_code=404, detail="Server not found")
+        raise HTTPException(status_code=404, detail=SERVER_NOT_FOUND)
 
     # Build update document with only provided fields
     update_doc = {}
@@ -171,18 +208,7 @@ async def update_server_settings(
 
     # Handle nested link_parse settings
     if settings.link_parse is not None:
-        link_parse_updates = {}
-        if settings.link_parse.clan is not None:
-            link_parse_updates["link_parse.clan"] = settings.link_parse.clan
-        if settings.link_parse.army is not None:
-            link_parse_updates["link_parse.army"] = settings.link_parse.army
-        if settings.link_parse.player is not None:
-            link_parse_updates["link_parse.player"] = settings.link_parse.player
-        if settings.link_parse.base is not None:
-            link_parse_updates["link_parse.base"] = settings.link_parse.base
-        if settings.link_parse.show is not None:
-            link_parse_updates["link_parse.show"] = settings.link_parse.show
-
+        link_parse_updates = _build_link_parse_updates(settings.link_parse)
         update_doc.update(link_parse_updates)
 
     if not update_doc:
@@ -195,7 +221,7 @@ async def update_server_settings(
     )
 
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Server not found")
+        raise HTTPException(status_code=404, detail=SERVER_NOT_FOUND)
 
     return ServerSettingsResponse(
         message="Server settings updated successfully",

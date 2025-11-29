@@ -16,6 +16,9 @@ from .models import (
 
 security = HTTPBearer()
 
+# Constants
+AUTOBOARD_NOT_FOUND = "Autoboard not found"
+
 router = APIRouter(prefix="/v2/server", tags=["Server AutoBoards"], include_in_schema=True)
 
 
@@ -25,10 +28,10 @@ router = APIRouter(prefix="/v2/server", tags=["Server AutoBoards"], include_in_s
 @capture_endpoint_errors
 async def get_server_autoboards(
     server_id: int,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient
+    mongo: MongoClient,
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security)
 ) -> ServerAutoBoardsResponse:
     """
     Get all autoboards configured for a server.
@@ -94,10 +97,10 @@ async def get_server_autoboards(
 async def create_autoboard(
     server_id: int,
     autoboard: CreateAutoBoardRequest,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient
+    mongo: MongoClient,
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security)
 ) -> dict:
     """
     Create a new autoboard for a server.
@@ -157,10 +160,10 @@ async def update_autoboard(
     server_id: int,
     autoboard_id: str,
     autoboard: UpdateAutoBoardRequest,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient
+    mongo: MongoClient,
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security)
 ) -> dict:
     """
     Update an existing autoboard.
@@ -172,7 +175,7 @@ async def update_autoboard(
     })
 
     if not existing:
-        raise HTTPException(status_code=404, detail="Autoboard not found")
+        raise HTTPException(status_code=404, detail=AUTOBOARD_NOT_FOUND)
 
     # Build update document
     update_doc = {}
@@ -200,7 +203,7 @@ async def update_autoboard(
     )
 
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Autoboard not found")
+        raise HTTPException(status_code=404, detail=AUTOBOARD_NOT_FOUND)
 
     return {
         "message": "Autoboard updated successfully",
@@ -216,10 +219,10 @@ async def update_autoboard(
 async def delete_autoboard(
     server_id: int,
     autoboard_id: str,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient
+    mongo: MongoClient,
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security)
 ) -> dict:
     """
     Delete an autoboard.
@@ -231,7 +234,7 @@ async def delete_autoboard(
     })
 
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Autoboard not found")
+        raise HTTPException(status_code=404, detail=AUTOBOARD_NOT_FOUND)
 
     return {
         "message": "Autoboard deleted successfully",

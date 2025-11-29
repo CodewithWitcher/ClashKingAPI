@@ -16,4 +16,4 @@ from utils.sentry_utils import capture_endpoint_errors
 
 router = APIRouter(prefix="/v2", tags=["Raid"], include_in_schema=True)
 
-# TODO: Add raid endpoints here when needed
+# TODO: Add raid endpoints

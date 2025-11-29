@@ -18,12 +18,13 @@ dependencies = [
     "hikari @ git+https://github.com/hikari-py/hikari.git",
     "linkd",
     "matplotlib",
+    "openpyxl",
     "orjson",
     "pandas",
     "passlib",
     "pendulum",
     "pillow",
-    "pydantic",
+    "pydantic>=2.10.3",
     "pyjwt",
     "pymongo>=4.5.0",
     "python-dotenv",
@@ -34,6 +35,7 @@ dependencies = [
     "slowapi",
     "uvloop",
     "uvicorn",
+    "fastapi-cache2>=0.2.2",
 ]
 
 [project.optional-dependencies]

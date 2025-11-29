@@ -25,6 +25,98 @@ import hikari
 security = HTTPBearer()
 router = APIRouter(prefix="/v2/server", tags=["Clan Settings"], include_in_schema=True)
 
+# Constants
+CLAN_NOT_FOUND_ON_SERVER = "Clan not found on this server"
+
+
+def build_clan_log_settings(logs_data: dict) -> ClanLogSettings:
+    """Build ClanLogSettings from clan document logs data.
+
+    Args:
+        logs_data: The logs dictionary from clan document
+
+    Returns:
+        ClanLogSettings object with join/leave log configurations
+    """
+    join_log = logs_data.get("join_log", {})
+    leave_log = logs_data.get("leave_log", {})
+
+    return ClanLogSettings(
+        join_log=LogButtonSettings(
+            profile_button=join_log.get("profile_button", False),
+            strike_button=None,
+            ban_button=None
+        ),
+        leave_log=LogButtonSettings(
+            profile_button=None,
+            strike_button=leave_log.get("strike_button", False),
+            ban_button=leave_log.get("ban_button", False)
+        )
+    )
+
+
+def build_member_count_warning(mcw_data: dict) -> MemberCountWarning:
+    """Build MemberCountWarning from clan document data.
+
+    Args:
+        mcw_data: The member_count_warning dictionary from clan document
+
+    Returns:
+        MemberCountWarning object with channel, thresholds, and role
+    """
+    return MemberCountWarning(
+        channel=mcw_data.get("channel"),
+        above=mcw_data.get("above"),
+        below=mcw_data.get("below"),
+        role=mcw_data.get("role")
+    )
+
+
+def build_clan_settings_update_doc(settings: ClanSettingsUpdate) -> dict:
+    """Build MongoDB update document from ClanSettingsUpdate.
+
+    Args:
+        settings: ClanSettingsUpdate with fields to update
+
+    Returns:
+        Dictionary with MongoDB field paths and values
+    """
+    update_doc = {}
+
+    # Direct field mappings (using DB field names)
+    direct_fields = [
+        "generalRole", "leaderRole", "clanChannel", "category",
+        "abbreviation", "greeting", "auto_greet_option", "leadership_eval",
+        "warCountdown", "warTimerCountdown", "ban_alert_channel"
+    ]
+
+    for field in direct_fields:
+        value = getattr(settings, field, None)
+        if value is not None:
+            update_doc[field] = value
+
+    # Handle nested member_count_warning
+    if settings.member_count_warning is not None:
+        mcw = settings.member_count_warning
+        if mcw.channel is not None:
+            update_doc["member_count_warning.channel"] = mcw.channel
+        if mcw.above is not None:
+            update_doc["member_count_warning.above"] = mcw.above
+        if mcw.below is not None:
+            update_doc["member_count_warning.below"] = mcw.below
+        if mcw.role is not None:
+            update_doc["member_count_warning.role"] = mcw.role
+
+    # Handle log button settings
+    if settings.join_log_profile_button is not None:
+        update_doc["logs.join_log.profile_button"] = settings.join_log_profile_button
+    if settings.leave_log_strike_button is not None:
+        update_doc["logs.leave_log.strike_button"] = settings.leave_log_strike_button
+    if settings.leave_log_ban_button is not None:
+        update_doc["logs.leave_log.ban_button"] = settings.leave_log_ban_button
+
+    return update_doc
+
 
 @router.get("/{server_id}/clans",
             name="Get all clans for server",
@@ -34,13 +126,13 @@ router = APIRouter(prefix="/v2/server", tags=["Clan Settings"], include_in_schem
 @capture_endpoint_errors
 async def get_server_clans(
     server_id: int,
-    user_id: str = None,
-    request: Request = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _request: Request = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient,
     coc_client: CustomClashClient,
-    rest: hikari.RESTApp
+    _rest: hikari.RESTApp = None
 ) -> List[ClanListItem]:
     """
     Get all clans configured for a server.
@@ -73,32 +165,9 @@ async def get_server_clans(
             # Continue with database data if API fetch fails
             pass
 
-        # Build logs structure
-        logs_data = clan_doc.get("logs", {})
-        join_log = logs_data.get("join_log", {})
-        leave_log = logs_data.get("leave_log", {})
-
-        logs = ClanLogSettings(
-            join_log=LogButtonSettings(
-                profile_button=join_log.get("profile_button", False),
-                strike_button=None,
-                ban_button=None
-            ),
-            leave_log=LogButtonSettings(
-                profile_button=None,
-                strike_button=leave_log.get("strike_button", False),
-                ban_button=leave_log.get("ban_button", False)
-            )
-        )
-
-        # Build member count warning
-        mcw_data = clan_doc.get("member_count_warning", {})
-        member_count_warning = MemberCountWarning(
-            channel=mcw_data.get("channel"),
-            above=mcw_data.get("above"),
-            below=mcw_data.get("below"),
-            role=mcw_data.get("role")
-        )
+        # Build logs and warnings using helper functions
+        logs = build_clan_log_settings(clan_doc.get("logs", {}))
+        member_count_warning = build_member_count_warning(clan_doc.get("member_count_warning", {}))
 
         # Build settings
         settings = ClanSettings(
@@ -138,12 +207,12 @@ async def get_server_clans(
 async def get_clan_settings(
     server_id: int,
     clan_tag: str,
-    user_id: str = None,
-    request: Request = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _request: Request = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient,
-    rest: hikari.RESTApp
+    _rest: hikari.RESTApp = None
 ) -> ClanSettingsDetail:
     """
     Get detailed settings for a specific clan.
@@ -164,34 +233,11 @@ async def get_clan_settings(
     })
 
     if not clan_doc:
-        raise HTTPException(status_code=404, detail="Clan not found on this server")
+        raise HTTPException(status_code=404, detail=CLAN_NOT_FOUND_ON_SERVER)
 
-    # Build logs structure
-    logs_data = clan_doc.get("logs", {})
-    join_log = logs_data.get("join_log", {})
-    leave_log = logs_data.get("leave_log", {})
-
-    logs = ClanLogSettings(
-        join_log=LogButtonSettings(
-            profile_button=join_log.get("profile_button", False),
-            strike_button=None,
-            ban_button=None
-        ),
-        leave_log=LogButtonSettings(
-            profile_button=None,
-            strike_button=leave_log.get("strike_button", False),
-            ban_button=leave_log.get("ban_button", False)
-        )
-    )
-
-    # Build member count warning
-    mcw_data = clan_doc.get("member_count_warning", {})
-    member_count_warning = MemberCountWarning(
-        channel=mcw_data.get("channel"),
-        above=mcw_data.get("above"),
-        below=mcw_data.get("below"),
-        role=mcw_data.get("role")
-    )
+    # Build logs and warnings using helper functions
+    logs = build_clan_log_settings(clan_doc.get("logs", {}))
+    member_count_warning = build_member_count_warning(clan_doc.get("member_count_warning", {}))
 
     return ClanSettingsDetail(
         tag=clan_tag,
@@ -223,9 +269,9 @@ async def update_clan_settings(
     server_id: int,
     clan_tag: str,
     settings: ClanSettingsUpdate,
-    user_id: str = None,
-    request: Request = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _request: Request = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient
 ) -> ClanSettingsResponse:
@@ -243,41 +289,10 @@ async def update_clan_settings(
         "$and": [{"tag": clan_tag}, {"server": server_id}]
     })
     if not existing:
-        raise HTTPException(status_code=404, detail="Clan not found on this server")
+        raise HTTPException(status_code=404, detail=CLAN_NOT_FOUND_ON_SERVER)
 
-    # Build update document with only provided fields
-    update_doc = {}
-
-    # Direct field mappings (using DB field names)
-    direct_fields = [
-        "generalRole", "leaderRole", "clanChannel", "category",
-        "abbreviation", "greeting", "auto_greet_option", "leadership_eval",
-        "warCountdown", "warTimerCountdown", "ban_alert_channel"
-    ]
-
-    for field in direct_fields:
-        value = getattr(settings, field, None)
-        if value is not None:
-            update_doc[field] = value
-
-    # Handle nested member_count_warning
-    if settings.member_count_warning is not None:
-        if settings.member_count_warning.channel is not None:
-            update_doc["member_count_warning.channel"] = settings.member_count_warning.channel
-        if settings.member_count_warning.above is not None:
-            update_doc["member_count_warning.above"] = settings.member_count_warning.above
-        if settings.member_count_warning.below is not None:
-            update_doc["member_count_warning.below"] = settings.member_count_warning.below
-        if settings.member_count_warning.role is not None:
-            update_doc["member_count_warning.role"] = settings.member_count_warning.role
-
-    # Handle log button settings
-    if settings.join_log_profile_button is not None:
-        update_doc["logs.join_log.profile_button"] = settings.join_log_profile_button
-    if settings.leave_log_strike_button is not None:
-        update_doc["logs.leave_log.strike_button"] = settings.leave_log_strike_button
-    if settings.leave_log_ban_button is not None:
-        update_doc["logs.leave_log.ban_button"] = settings.leave_log_ban_button
+    # Build update document using helper function
+    update_doc = build_clan_settings_update_doc(settings)
 
     if not update_doc:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -308,9 +323,9 @@ async def update_clan_settings(
 async def add_clan(
     server_id: int,
     clan_request: AddClanRequest,
-    user_id: str = None,
-    request: Request = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _request: Request = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient,
     coc_client: CustomClashClient
@@ -349,8 +364,8 @@ async def add_clan(
         clan_name = clan_data.name
     except coc.NotFound:
         raise HTTPException(status_code=404, detail=f"Clan {clan_tag} not found in Clash of Clans")
-    except Exception as e:
-        # Use provided name if API fetch fails
+    except (coc.Maintenance, coc.GatewayError):
+        # Use provided name if API is unavailable
         clan_name = clan_request.name or "Unknown Clan"
 
     # Create clan document with default settings
@@ -382,7 +397,7 @@ async def add_clan(
     }
 
     # Insert clan
-    result = await mongo.clan_db.insert_one(clan_doc)
+    await mongo.clan_db.insert_one(clan_doc)
 
     return AddClanResponse(
         message="Clan added successfully",
@@ -401,9 +416,9 @@ async def add_clan(
 async def remove_clan(
     server_id: int,
     clan_tag: str,
-    user_id: str = None,
-    request: Request = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _request: Request = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient
 ) -> RemoveClanResponse:
@@ -423,7 +438,7 @@ async def remove_clan(
         "$and": [{"tag": clan_tag}, {"server": server_id}]
     })
     if not existing:
-        raise HTTPException(status_code=404, detail="Clan not found on this server")
+        raise HTTPException(status_code=404, detail=CLAN_NOT_FOUND_ON_SERVER)
 
     # Delete clan document
     result = await mongo.clan_db.delete_one({

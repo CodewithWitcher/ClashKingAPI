@@ -1,28 +1,56 @@
 import pendulum as pend
 
 from bson.objectid import ObjectId
-from fastapi import  Request, Response
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi_cache.decorator import cache
-from routers.v2.models.models import JoinLeaveList
-from utils.utils import fix_tag, db_client
-
+from routers.v2.clan.models import JoinLeaveList
+from utils.utils import fix_tag
+from utils.database import MongoClient
+import linkd
 
 router = APIRouter(tags=["Clan Endpoints"])
 
+
+class ClanFilterParams:
+    def __init__(
+        self,
+        location_id: int | None = None,
+        min_members: int | None = None,
+        max_members: int | None = None,
+        min_level: int | None = None,
+        max_level: int | None = None,
+        open_type: str | None = None,
+        min_war_win_streak: int | None = None,
+        min_war_wins: int | None = None,
+        min_clan_trophies: int | None = None,
+        max_clan_trophies: int | None = None,
+        capital_league: str | None = None,
+        war_league: str | None = None,
+    ):
+        self.location_id = location_id
+        self.min_members = min_members
+        self.max_members = max_members
+        self.min_level = min_level
+        self.max_level = max_level
+        self.open_type = open_type
+        self.min_war_win_streak = min_war_win_streak
+        self.min_war_wins = min_war_wins
+        self.min_clan_trophies = min_clan_trophies
+        self.max_clan_trophies = max_clan_trophies
+        self.capital_league = capital_league
+        self.war_league = war_league
 
 
 @router.get("/clan/{clan_tag}/basic",
          name="Basic Clan Object")
 @cache(expire=300)
-async def clan_basic(clan_tag: str, request: Request, response: Response):
+@linkd.ext.fastapi.inject
+async def clan_basic(clan_tag: str, *, mongo: MongoClient):
     clan_tag = fix_tag(clan_tag)
-    result = await db_client.basic_clan.find_one({"tag": clan_tag})
+    result = await mongo.basic_clan.find_one({"tag": clan_tag})
     if result is not None:
         del result["_id"]
     return result
-
-
 
 
 @router.get(
@@ -30,9 +58,10 @@ async def clan_basic(clan_tag: str, request: Request, response: Response):
         name="Join Leaves in a season",
         response_model=JoinLeaveList)
 @cache(expire=300)
-async def clan_join_leave(clan_tag: str, request: Request, response: Response, timestamp_start: int = 0, time_stamp_end: int = 9999999999, limit: int = 250):
+@linkd.ext.fastapi.inject
+async def clan_join_leave(clan_tag: str, timestamp_start: int = 0, time_stamp_end: int = 9999999999, limit: int = 250, *, mongo: MongoClient):
     clan_tag = fix_tag(clan_tag)
-    result = await db_client.join_leave_history.find(
+    result = await mongo.join_leave_history.find(
         {"$and" : [
             {"clan" : clan_tag},
             {"time" : {"$gte" : pend.from_timestamp(timestamp=timestamp_start, tz=pend.UTC)}},
@@ -47,47 +76,52 @@ async def clan_join_leave(clan_tag: str, request: Request, response: Response, t
 @router.get("/clan/search",
          name="Search Clans by Filtering")
 @cache(expire=300)
-async def clan_filter(request: Request, response: Response,  limit: int= 100, location_id: int = None, minMembers: int = None, maxMembers: int = None,
-                      minLevel: int = None, maxLevel: int = None, openType: str = None,
-                      minWarWinStreak: int = None, minWarWins: int = None, minClanTrophies: int = None, maxClanTrophies: int = None, capitalLeague: str= None,
-                      warLeague: str= None, memberList: bool = True, before:str =None, after: str=None):
-    queries = {}
-    queries['$and'] = []
-    if location_id:
-        queries['$and'].append({'location.id': location_id})
+@linkd.ext.fastapi.inject
+async def clan_filter(
+    limit: int = 100,
+    member_list: bool = True,
+    before: str | None = None,
+    after: str | None = None,
+    filters: ClanFilterParams = Depends(),
+    *,
+    mongo: MongoClient
+):
+    queries = {'$and': []}
+    if filters.location_id:
+        queries['$and'].append({'location.id': filters.location_id})
 
-    if minMembers:
-        queries['$and'].append({"members": {"$gte" : minMembers}})
+    if filters.min_members:
+        queries['$and'].append({"members": {"$gte": filters.min_members}})
 
-    if maxMembers:
-        queries['$and'].append({"members": {"$lte" : maxMembers}})
+    if filters.max_members:
+        queries['$and'].append({"members": {"$lte": filters.max_members}})
 
-    if minLevel:
-        queries['$and'].append({"level": {"$gte" : minLevel}})
+    if filters.min_level:
+        queries['$and'].append({"level": {"$gte": filters.min_level}})
 
-    if maxLevel:
-        queries['$and'].append({"level": {"$lte" : maxLevel}})
+    if filters.max_level:
+        queries['$and'].append({"level": {"$lte": filters.max_level}})
 
-    if openType:
-        queries['$and'].append({"type": openType})
+    if filters.open_type:
+        queries['$and'].append({"type": filters.open_type})
 
-    if capitalLeague:
-        queries['$and'].append({"capitalLeague": capitalLeague})
+    if filters.capital_league:
+        queries['$and'].append({"capitalLeague": filters.capital_league})
 
-    if warLeague:
-        queries['$and'].append({"warLeague": warLeague})
+    if filters.war_league:
+        queries['$and'].append({"warLeague": filters.war_league})
 
-    if minWarWinStreak:
-        queries['$and'].append({"warWinStreak": {"$gte": minWarWinStreak}})
+    if filters.min_war_win_streak:
+        queries['$and'].append({"warWinStreak": {"$gte": filters.min_war_win_streak}})
 
-    if minWarWins:
-        queries['$and'].append({"warWins": {"$gte": minWarWins}})
+    if filters.min_war_wins:
+        queries['$and'].append({"warWins": {"$gte": filters.min_war_wins}})
 
-    if minClanTrophies:
-        queries['$and'].append({"clanPoints": {"$gte": minClanTrophies}})
+    if filters.min_clan_trophies:
+        queries['$and'].append({"clanPoints": {"$gte": filters.min_clan_trophies}})
 
-    if maxClanTrophies:
-        queries['$and'].append({"clanPoints": {"$gte": maxClanTrophies}})
+    if filters.max_clan_trophies:
+        queries['$and'].append({"clanPoints": {"$gte": filters.max_clan_trophies}})
 
     if after:
         queries['$and'].append({"_id": {"$gt": ObjectId(after)}})
@@ -96,18 +130,18 @@ async def clan_filter(request: Request, response: Response,  limit: int= 100, lo
         queries['$and'].append({"_id": {"$lt": ObjectId(before)}})
 
 
-    if queries["$and"] == []:
+    if not queries["$and"]:
         queries = {}
 
     limit = min(limit, 1000)
-    results = await db_client.basic_clan.find(queries).limit(limit).sort("_id", 1).to_list(length=limit)
-    return_data = {"items" : [], "before": "", "after" : ""}
+    results = await mongo.basic_clan.find(queries).limit(limit).sort("_id", 1).to_list(length=limit)
+    return_data = {"items": [], "before": "", "after": ""}
     if results:
         return_data["before"] = str(results[0].get("_id"))
         return_data["after"] = str(results[-1].get("_id"))
         for data in results:
             del data["_id"]
-            if not memberList:
+            if not member_list:
                 del data["memberList"]
         return_data["items"] = results
     return return_data
@@ -118,10 +152,11 @@ async def clan_filter(request: Request, response: Response,  limit: int= 100, lo
 @router.get("/clan/{clan_tag}/historical",
          name="Historical data for a clan of player events")
 @cache(expire=300)
-async def clan_historical(clan_tag: str, request: Request, response: Response, timestamp_start: int = 0, time_stamp_end: int = 9999999999, limit: int = 100):
+@linkd.ext.fastapi.inject
+async def clan_historical(clan_tag: str, timestamp_start: int = 0, time_stamp_end: int = 9999999999, limit: int = 100, *, mongo: MongoClient):
     clan_tag = fix_tag(clan_tag)
 
-    historical_data = await db_client.player_history.find(
+    historical_data = await mongo.player_history.find(
         {"$and": [
             {"clan": clan_tag},
             {"time": {"$gte": int(pend.from_timestamp(timestamp=timestamp_start, tz=pend.UTC).timestamp())}},

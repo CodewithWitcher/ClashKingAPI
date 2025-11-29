@@ -4,7 +4,12 @@
       "Bash(python:*)",
       "Bash(find:*)",
       "Bash(python3:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(uv lock:*)",
+      "Bash(radon cc:*)",
+      "Bash(uv add:*)",
+      "Bash(uv run:*)",
+      "Bash(uv pip:*)"
     ],
     "deny": [],
     "ask": []

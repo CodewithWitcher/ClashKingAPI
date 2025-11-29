@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request, Depends, Body
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from utils.security import check_authentication
 from utils.database import MongoClient
@@ -30,6 +30,9 @@ security = HTTPBearer()
 config = Config()
 router = APIRouter(prefix="/v2/server", tags=["Role Management"], include_in_schema=True)
 
+# Constants
+SERVER_NOT_FOUND = "Server not found"
+
 
 # Mapping of role types to Pydantic models
 ROLE_MODELS = {
@@ -56,6 +59,93 @@ def get_role_collection(mongo: MongoClient, role_type: str):
     return collection_map.get(role_type)
 
 
+def build_duplicate_query(server_id: int, role_type: str, role_data) -> dict:
+    """Build query to check for duplicate roles based on role type."""
+    query = {"server": server_id}
+
+    if role_type == "townhall":
+        query["th"] = role_data.th
+    elif role_type in ["league", "builder_league"]:
+        query["type"] = role_data.type
+    elif role_type == "builderhall":
+        query["bh"] = role_data.bh
+    elif role_type == "achievement":
+        query["type"] = role_data.type
+        query["season"] = role_data.season
+        query["amount"] = role_data.amount
+    elif role_type == "family_position":
+        query["type"] = role_data.type
+
+    return query
+
+
+async def create_status_role(mongo: MongoClient, server_id: int, server: dict, role_data, role_doc: dict) -> int:
+    """Handle creation/update of status roles."""
+    existing_roles = server.get("status_roles", {}).get("discord", [])
+    if any(r.get("months") == role_data.months for r in existing_roles):
+        # Update existing
+        await mongo.server_db.update_one(
+            {"server": server_id, "status_roles.discord.months": role_data.months},
+            {"$set": {"status_roles.discord.$.id": role_data.id}}
+        )
+    else:
+        # Add new
+        await mongo.server_db.update_one(
+            {"server": server_id},
+            {"$addToSet": {"status_roles.discord": role_doc}}
+        )
+    return role_data.id
+
+
+async def create_standard_role(collection, query: dict, role_type: str, role_data, role_doc: dict) -> int:
+    """Handle creation/update of standard roles (non-status)."""
+    existing = await collection.find_one(query)
+
+    if existing:
+        # Update existing role
+        if role_type == "achievement":
+            await collection.update_one(query, {"$set": {"id": role_data.id}})
+            return role_data.id
+        else:
+            await collection.update_one(query, {"$set": {"role": role_data.role}})
+            return role_data.role
+    else:
+        # Insert new role
+        await collection.insert_one(role_doc)
+        return role_data.id if role_type == "achievement" else role_data.role
+
+
+async def fetch_roles_by_type(mongo: MongoClient, server_id: int, role_type: str, server: dict) -> list:
+    """Fetch roles for a specific role type."""
+    if role_type == "status":
+        # Status roles are in server_db
+        status_roles_data = server.get("status_roles")
+        if status_roles_data and isinstance(status_roles_data, dict):
+            return status_roles_data.get("discord", [])
+        return []
+    else:
+        collection = get_role_collection(mongo, role_type)
+        if collection is not None:
+            return await collection.find({"server": server_id}).to_list(length=None)
+        return []
+
+
+def sanitize_role_data(role_list: list) -> None:
+    """Remove internal fields and convert Discord IDs to strings for JSON compatibility."""
+    for role in role_list:
+        if isinstance(role, dict):
+            role.pop("_id", None)
+            role.pop("toggle", None)
+
+            # Convert Discord Snowflake IDs to strings
+            # JavaScript can't handle 64-bit integers without precision loss
+            if "role" in role and isinstance(role["role"], int):
+                role["role"] = str(role["role"])
+            # Status roles use "id" instead of "role"
+            if "id" in role and isinstance(role["id"], int):
+                role["id"] = str(role["id"])
+
+
 @router.get("/{server_id}/roles/{role_type}",
             name="List roles by type",
             response_model=RolesListResponse)
@@ -65,12 +155,11 @@ def get_role_collection(mongo: MongoClient, role_type: str):
 async def list_roles(
     server_id: int,
     role_type: RoleType,
-    user_id: str = None,
-    request: Request = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _request: Request = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient,
-    rest: hikari.RESTApp
+    mongo: MongoClient
 ) -> RolesListResponse:
     """
     List all roles of a specific type for a server.
@@ -88,7 +177,7 @@ async def list_roles(
     if role_type == "status":
         server = await mongo.server_db.find_one({"server": server_id})
         if not server:
-            raise HTTPException(status_code=404, detail="Server not found")
+            raise HTTPException(status_code=404, detail=SERVER_NOT_FOUND)
 
         status_roles_data = server.get("status_roles")
         if status_roles_data and isinstance(status_roles_data, dict):
@@ -136,12 +225,11 @@ async def create_role(
         StatusRoleCreate,
         FamilyPositionRoleCreate,
     ],
-    user_id: str = None,
-    request: Request = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _request: Request = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient,
-    rest: hikari.RESTApp
+    mongo: MongoClient
 ) -> RoleResponse:
     """
     Create a new role for a server.
@@ -158,60 +246,19 @@ async def create_role(
     # Verify server exists
     server = await mongo.server_db.find_one({"server": server_id})
     if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
+        raise HTTPException(status_code=404, detail=SERVER_NOT_FOUND)
 
     role_doc = role_data.model_dump()
     role_doc["server"] = server_id
 
-    # Special handling for status roles (stored in server_db)
+    # Handle status roles differently (stored in server_db)
     if role_type == "status":
-        # Check if this months value already exists
-        existing_roles = server.get("status_roles", {}).get("discord", [])
-        if any(r.get("months") == role_data.months for r in existing_roles):
-            # Update existing
-            await mongo.server_db.update_one(
-                {"server": server_id, "status_roles.discord.months": role_data.months},
-                {"$set": {"status_roles.discord.$.id": role_data.id}}
-            )
-        else:
-            # Add new
-            await mongo.server_db.update_one(
-                {"server": server_id},
-                {"$addToSet": {"status_roles.discord": role_doc}}
-            )
-        role_id = role_data.id
+        role_id = await create_status_role(mongo, server_id, server, role_data, role_doc)
     else:
         # Get collection for other role types
         collection = get_role_collection(mongo, role_type)
-
-        # Check for duplicates
-        query = {"server": server_id}
-        if role_type == "townhall":
-            query["th"] = role_data.th
-        elif role_type in ["league", "builder_league"]:
-            query["type"] = role_data.type
-        elif role_type == "builderhall":
-            query["bh"] = role_data.bh
-        elif role_type == "achievement":
-            query["type"] = role_data.type
-            query["season"] = role_data.season
-            query["amount"] = role_data.amount
-        elif role_type == "family_position":
-            query["type"] = role_data.type
-
-        existing = await collection.find_one(query)
-        if existing:
-            # Update existing role
-            if role_type == "achievement":
-                await collection.update_one(query, {"$set": {"id": role_data.id}})
-                role_id = role_data.id
-            else:
-                await collection.update_one(query, {"$set": {"role": role_data.role}})
-                role_id = role_data.role
-        else:
-            # Insert new role
-            await collection.insert_one(role_doc)
-            role_id = role_data.id if role_type == "achievement" else role_data.role
+        query = build_duplicate_query(server_id, role_type, role_data)
+        role_id = await create_standard_role(collection, query, role_type, role_data, role_doc)
 
     return RoleResponse(
         message=f"{role_type.replace('_', ' ').title()} role created successfully",
@@ -231,12 +278,11 @@ async def delete_role(
     server_id: int,
     role_type: RoleType,
     role_id: int,
-    user_id: str = None,
-    request: Request = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _request: Request = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient,
-    rest: hikari.RESTApp
+    mongo: MongoClient
 ) -> RoleResponse:
     """
     Delete a role by its Discord role ID.
@@ -281,8 +327,8 @@ async def delete_role(
 @cache_endpoint(ttl=30, key_prefix="discord-roles")
 async def get_discord_roles(
     server_id: int,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient,
     rest: hikari.RESTApp
@@ -296,7 +342,7 @@ async def get_discord_roles(
     # Verify server exists
     server = await mongo.server_db.find_one({"server": server_id})
     if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
+        raise HTTPException(status_code=404, detail=SERVER_NOT_FOUND)
 
     # Fetch roles from Discord API
     try:
@@ -335,11 +381,10 @@ async def get_discord_roles(
 @capture_endpoint_errors
 async def get_role_settings(
     server_id: int,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient,
-    rest: hikari.RESTApp
+    mongo: MongoClient
 ) -> RoleSettingsResponse:
     """
     Get global role management settings for a server.
@@ -349,7 +394,7 @@ async def get_role_settings(
     # Fetch server settings
     server = await mongo.server_db.find_one({"server": server_id})
     if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
+        raise HTTPException(status_code=404, detail=SERVER_NOT_FOUND)
 
     return RoleSettingsResponse(
         server_id=server_id,
@@ -372,11 +417,10 @@ async def get_role_settings(
 async def update_role_settings(
     server_id: int,
     settings: RoleSettingsUpdate,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient,
-    rest: hikari.RESTApp
+    mongo: MongoClient
 ) -> RoleResponse:
     """
     Update global role management settings for a server.
@@ -386,7 +430,7 @@ async def update_role_settings(
     # Verify server exists
     server = await mongo.server_db.find_one({"server": server_id})
     if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
+        raise HTTPException(status_code=404, detail=SERVER_NOT_FOUND)
 
     # Build update document
     update_doc = {}
@@ -429,11 +473,10 @@ async def update_role_settings(
 @capture_endpoint_errors
 async def get_all_roles(
         server_id: int,
-        user_id: str = None,
-        credentials: HTTPAuthorizationCredentials = Depends(security),
+        _user_id: str = None,
+        _credentials: HTTPAuthorizationCredentials = Depends(security),
         *,
-        mongo: MongoClient,
-        rest: hikari.RESTApp
+        mongo: MongoClient
 ) -> AllRolesResponse:
     """
     Get all configured roles of all types in a single request.
@@ -443,7 +486,7 @@ async def get_all_roles(
     # Verify server exists
     server = await mongo.server_db.find_one({"server": server_id})
     if not server:
-        raise HTTPException(status_code=404, detail="Server not found")
+        raise HTTPException(status_code=404, detail=SERVER_NOT_FOUND)
 
     all_roles = {}
     total_count = 0
@@ -452,34 +495,8 @@ async def get_all_roles(
     role_types = ["townhall", "league", "builderhall", "builder_league", "achievement", "status", "family_position"]
 
     for role_type in role_types:
-        if role_type == "status":
-            # Status roles are in server_db
-            status_roles_data = server.get("status_roles")
-            if status_roles_data and isinstance(status_roles_data, dict):
-                role_list = status_roles_data.get("discord", [])
-            else:
-                role_list = []
-        else:
-            collection = get_role_collection(mongo, role_type)
-            if collection is not None:
-                roles = await collection.find({"server": server_id}).to_list(length=None)
-                role_list = roles
-            else:
-                role_list = []
-
-        # Remove _id and toggle fields, convert Discord IDs to strings
-        for role in role_list:
-            if isinstance(role, dict):
-                role.pop("_id", None)
-                role.pop("toggle", None)
-
-                # Convert Discord Snowflake IDs to strings
-                # JavaScript can't handle 64-bit integers without precision loss
-                if "role" in role and isinstance(role["role"], int):
-                    role["role"] = str(role["role"])
-                # Status roles use "id" instead of "role"
-                if "id" in role and isinstance(role["id"], int):
-                    role["id"] = str(role["id"])
+        role_list = await fetch_roles_by_type(mongo, server_id, role_type, server)
+        sanitize_role_data(role_list)
 
         all_roles[role_type] = role_list
         total_count += len(role_list)

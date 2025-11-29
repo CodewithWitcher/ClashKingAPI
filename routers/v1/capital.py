@@ -1,12 +1,14 @@
 
 
 from collections import defaultdict
-from fastapi import  Request, Response, HTTPException
+from fastapi import HTTPException
 from fastapi import APIRouter
 from fastapi_cache.decorator import cache
 from typing import List
-from utils.utils import fix_tag, db_client, leagues
+from utils.utils import fix_tag, leagues
+from utils.database import MongoClient
 from datetime import datetime
+import linkd
 
 
 
@@ -18,7 +20,8 @@ router = APIRouter(tags=["Clan Capital Endpoints"])
          tags=["Clan Capital Endpoints"],
          name="Stats about districts, (weekend: YYYY-MM-DD)")
 @cache(expire=8000000)
-async def capital_stats_district(weekend: str, request: Request, response: Response):
+@linkd.ext.fastapi.inject
+async def capital_stats_district(weekend: str, *, mongo: MongoClient):
     weekend_to_iso = datetime.strptime(weekend, "%Y-%m-%d")
     if (datetime.now() - weekend_to_iso).total_seconds() <= 273600:
         raise HTTPException(status_code=404, detail="Please wait until 4 hours after Raid Weekend is completed to collect stats")
@@ -46,14 +49,15 @@ async def capital_stats_district(weekend: str, request: Request, response: Respo
              }},
         {"$sort": {"_id.district_name": 1, "_id.district_level": 1}}
     ]
-    results = await db_client.capital.aggregate(pipeline=pipeline).to_list(length=None)
+    results = await mongo.capital.aggregate(pipeline=pipeline).to_list(length=None)
     return results
 
 @router.get("/capital/stats/leagues",
          tags=["Clan Capital Endpoints"],
          name="Stats about capital leagues, (weekend: YYYY-MM-DD")
 @cache(expire=8000000)
-async def capital_stats_leagues(weekend: str, request: Request, response: Response):
+@linkd.ext.fastapi.inject
+async def capital_stats_leagues(weekend: str, *, mongo: MongoClient):
     og_weekend = weekend
     weekend_to_iso = datetime.strptime(weekend, "%Y-%m-%d")
     if (datetime.now() - weekend_to_iso).total_seconds() <= 273600:
@@ -120,7 +124,7 @@ async def capital_stats_leagues(weekend: str, request: Request, response: Respon
               "sampleSize" : {"$sum" : 1}
               }},
     ]
-    results = await db_client.capital.aggregate(pipeline=pipeline).to_list(length=None)
+    results = await mongo.capital.aggregate(pipeline=pipeline).to_list(length=None)
     results.sort(key=lambda val : leagues.index(val.get("_id")))
     return results
 
@@ -130,8 +134,9 @@ async def capital_stats_leagues(weekend: str, request: Request, response: Respon
          tags=["Clan Capital Endpoints"],
          name="Log of Raid Weekends")
 @cache(expire=300)
-async def capital_log(clan_tag: str, request: Request, response: Response, limit: int = 5):
-    results = await db_client.capital.find({"clan_tag" : fix_tag(clan_tag)}).limit(limit).sort("data.startTime", -1).to_list(length=None)
+@linkd.ext.fastapi.inject
+async def capital_log(clan_tag: str, limit: int = 5, *, mongo: MongoClient):
+    results = await mongo.capital.find({"clan_tag" : fix_tag(clan_tag)}).limit(limit).sort("data.startTime", -1).to_list(length=None)
     for result in results:
         del result["_id"]
     return results
@@ -139,8 +144,9 @@ async def capital_log(clan_tag: str, request: Request, response: Response, limit
 @router.post("/capital/bulk",
          tags=["Clan Capital Endpoints"],
          name="Fetch Raid Weekends in Bulk (max 100 tags)")
-async def capital_bulk(clan_tags: List[str], request: Request, response: Response):
-    results = await db_client.capital.find({"clan_tag": {"$in" : [fix_tag(tag) for tag in clan_tags[:100]]}}).to_list(length=None)
+@linkd.ext.fastapi.inject
+async def capital_bulk(clan_tags: List[str], *, mongo: MongoClient):
+    results = await mongo.capital.find({"clan_tag": {"$in" : [fix_tag(tag) for tag in clan_tags[:100]]}}).to_list(length=None)
     fixed_results = defaultdict(list)
     for result in results:
         del result["_id"]

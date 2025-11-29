@@ -2,7 +2,6 @@ import hikari
 import linkd
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import List, Optional
 
 from utils.database import MongoClient
 from utils.security import check_authentication
@@ -16,7 +15,91 @@ from .models import (
 
 security = HTTPBearer()
 
+# Constants
+REMINDER_TYPE_CLAN_CAPITAL = "Clan Capital"
+REMINDER_TYPE_CLAN_GAMES = "Clan Games"
+REMINDER_NOT_FOUND = "Reminder not found"
+
 router = APIRouter(prefix="/v2/server", tags=["Server Reminders"], include_in_schema=True)
+
+
+def build_base_reminder_doc(server_id: int, reminder: CreateReminderRequest) -> dict:
+    """Build base reminder document with common fields.
+
+    Args:
+        server_id: Discord server ID
+        reminder: CreateReminderRequest with reminder data
+
+    Returns:
+        Dictionary with base reminder fields
+    """
+    return {
+        "server": server_id,
+        "type": reminder.type,
+        "clan": reminder.clan_tag,
+        "channel": int(reminder.channel_id) if reminder.channel_id else None,
+        "time": reminder.time,
+        "custom_text": reminder.custom_text or "",
+    }
+
+
+def add_war_reminder_fields(reminder_doc: dict, reminder: CreateReminderRequest) -> None:
+    """Add War-specific fields to reminder document.
+
+    Args:
+        reminder_doc: Base reminder document to update
+        reminder: CreateReminderRequest with reminder data
+    """
+    reminder_doc["types"] = reminder.war_types or ["Random", "Friendly", "CWL"]
+    reminder_doc["townhall_filter"] = reminder.townhall_filter or []
+    reminder_doc["roles"] = reminder.roles or []
+
+
+def add_capital_reminder_fields(reminder_doc: dict, reminder: CreateReminderRequest) -> None:
+    """Add Clan Capital-specific fields to reminder document.
+
+    Args:
+        reminder_doc: Base reminder document to update
+        reminder: CreateReminderRequest with reminder data
+    """
+    reminder_doc["attack_threshold"] = reminder.attack_threshold or 1
+    reminder_doc["townhalls"] = reminder.townhall_filter or []
+    reminder_doc["roles"] = reminder.roles or []
+
+
+def add_clan_games_reminder_fields(reminder_doc: dict, reminder: CreateReminderRequest) -> None:
+    """Add Clan Games-specific fields to reminder document.
+
+    Args:
+        reminder_doc: Base reminder document to update
+        reminder: CreateReminderRequest with reminder data
+    """
+    reminder_doc["point_threshold"] = reminder.point_threshold or 4000
+    reminder_doc["townhalls"] = reminder.townhall_filter or []
+    reminder_doc["roles"] = reminder.roles or []
+
+
+def add_inactivity_reminder_fields(reminder_doc: dict, reminder: CreateReminderRequest) -> None:
+    """Add Inactivity-specific fields to reminder document.
+
+    Args:
+        reminder_doc: Base reminder document to update
+        reminder: CreateReminderRequest with reminder data
+    """
+    reminder_doc["townhall_filter"] = reminder.townhall_filter or []
+    reminder_doc["roles"] = reminder.roles or []
+
+
+def add_roster_reminder_fields(reminder_doc: dict, reminder: CreateReminderRequest) -> None:
+    """Add roster-specific fields to reminder document.
+
+    Args:
+        reminder_doc: Base reminder document to update
+        reminder: CreateReminderRequest with reminder data
+    """
+    from bson import ObjectId
+    reminder_doc["roster"] = ObjectId(reminder.roster_id) if reminder.roster_id else None
+    reminder_doc["ping_type"] = reminder.ping_type or "All Roster Members"
 
 
 @router.get("/{server_id}/reminders", name="Get server reminders")
@@ -25,11 +108,11 @@ router = APIRouter(prefix="/v2/server", tags=["Server Reminders"], include_in_sc
 @capture_endpoint_errors
 async def get_server_reminders(
     server_id: int,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient,
-    rest: hikari.RESTApp
+    _rest: hikari.RESTApp = None
 ) -> ServerRemindersResponse:
     """
     Get all reminders configured for a server.
@@ -50,7 +133,7 @@ async def get_server_reminders(
         reminder_type = reminder.get("type")
 
         # Get townhall filter - ClashKingBot uses 'townhalls' for Capital/Games, 'townhall_filter' for War/Inactivity
-        if reminder_type in ["Clan Capital", "Clan Games"]:
+        if reminder_type in [REMINDER_TYPE_CLAN_CAPITAL, REMINDER_TYPE_CLAN_GAMES]:
             townhall_list = reminder.get("townhalls", [])
         else:
             townhall_list = reminder.get("townhall_filter", [])
@@ -73,9 +156,9 @@ async def get_server_reminders(
 
         if reminder.get("type") == "War":
             war_reminders.append(reminder_config)
-        elif reminder.get("type") == "Clan Capital":
+        elif reminder.get("type") == REMINDER_TYPE_CLAN_CAPITAL:
             capital_reminders.append(reminder_config)
-        elif reminder.get("type") == "Clan Games":
+        elif reminder.get("type") == REMINDER_TYPE_CLAN_GAMES:
             clan_games_reminders.append(reminder_config)
         elif reminder.get("type") == "Inactivity":
             inactivity_reminders.append(reminder_config)
@@ -98,11 +181,11 @@ async def get_server_reminders(
 async def create_reminder(
     server_id: int,
     reminder: CreateReminderRequest,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient,
-    rest: hikari.RESTApp
+    _rest: hikari.RESTApp = None
 ) -> dict:
     """
     Create a new reminder for a server.
@@ -112,36 +195,20 @@ async def create_reminder(
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
 
-    # Build reminder document
-    reminder_doc = {
-        "server": server_id,
-        "type": reminder.type,
-        "clan": reminder.clan_tag,
-        "channel": int(reminder.channel_id) if reminder.channel_id else None,
-        "time": reminder.time,
-        "custom_text": reminder.custom_text or "",
-    }
+    # Build base reminder document
+    reminder_doc = build_base_reminder_doc(server_id, reminder)
 
     # Add type-specific fields (match ClashKingBot schema)
     if reminder.type == "War":
-        reminder_doc["types"] = reminder.war_types or ["Random", "Friendly", "CWL"]
-        reminder_doc["townhall_filter"] = reminder.townhall_filter or []
-        reminder_doc["roles"] = reminder.roles or []
-    elif reminder.type == "Clan Capital":
-        reminder_doc["attack_threshold"] = reminder.attack_threshold or 1
-        reminder_doc["townhalls"] = reminder.townhall_filter or []  # ClashKingBot uses 'townhalls'
-        reminder_doc["roles"] = reminder.roles or []
-    elif reminder.type == "Clan Games":
-        reminder_doc["point_threshold"] = reminder.point_threshold or 4000
-        reminder_doc["townhalls"] = reminder.townhall_filter or []  # ClashKingBot uses 'townhalls'
-        reminder_doc["roles"] = reminder.roles or []
+        add_war_reminder_fields(reminder_doc, reminder)
+    elif reminder.type == REMINDER_TYPE_CLAN_CAPITAL:
+        add_capital_reminder_fields(reminder_doc, reminder)
+    elif reminder.type == REMINDER_TYPE_CLAN_GAMES:
+        add_clan_games_reminder_fields(reminder_doc, reminder)
     elif reminder.type == "Inactivity":
-        reminder_doc["townhall_filter"] = reminder.townhall_filter or []
-        reminder_doc["roles"] = reminder.roles or []
+        add_inactivity_reminder_fields(reminder_doc, reminder)
     elif reminder.type == "roster":
-        from bson import ObjectId
-        reminder_doc["roster"] = ObjectId(reminder.roster_id) if reminder.roster_id else None
-        reminder_doc["ping_type"] = reminder.ping_type or "All Roster Members"
+        add_roster_reminder_fields(reminder_doc, reminder)
 
     # Insert into database
     result = await mongo.reminders.insert_one(reminder_doc)
@@ -161,11 +228,11 @@ async def update_reminder(
     server_id: int,
     reminder_id: str,
     reminder: UpdateReminderRequest,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient,
-    rest: hikari.RESTApp
+    _rest: hikari.RESTApp = None
 ) -> dict:
     """
     Update an existing reminder.
@@ -179,7 +246,7 @@ async def update_reminder(
     })
 
     if not existing:
-        raise HTTPException(status_code=404, detail="Reminder not found")
+        raise HTTPException(status_code=404, detail=REMINDER_NOT_FOUND)
 
     # Build update document (match ClashKingBot schema)
     update_doc = {}
@@ -193,7 +260,7 @@ async def update_reminder(
     # Handle townhall filter based on type
     if reminder.townhall_filter is not None:
         reminder_type = existing.get("type")
-        if reminder_type in ["Clan Capital", "Clan Games"]:
+        if reminder_type in [REMINDER_TYPE_CLAN_CAPITAL, REMINDER_TYPE_CLAN_GAMES]:
             update_doc["townhalls"] = reminder.townhall_filter  # ClashKingBot uses 'townhalls'
         else:
             update_doc["townhall_filter"] = reminder.townhall_filter
@@ -219,7 +286,7 @@ async def update_reminder(
     )
 
     if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Reminder not found")
+        raise HTTPException(status_code=404, detail=REMINDER_NOT_FOUND)
 
     return {
         "message": "Reminder updated successfully",
@@ -235,11 +302,11 @@ async def update_reminder(
 async def delete_reminder(
     server_id: int,
     reminder_id: str,
-    user_id: str = None,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    _user_id: str = None,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient,
-    rest: hikari.RESTApp
+    _rest: hikari.RESTApp = None
 ) -> dict:
     """
     Delete a reminder.
@@ -253,7 +320,7 @@ async def delete_reminder(
     })
 
     if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Reminder not found")
+        raise HTTPException(status_code=404, detail=REMINDER_NOT_FOUND)
 
     return {
         "message": "Reminder deleted successfully",
