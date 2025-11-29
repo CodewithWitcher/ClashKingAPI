@@ -2,7 +2,7 @@
 import sentry_sdk
 from functools import wraps
 from fastapi import HTTPException
-from typing import Callable, Any
+from typing import Callable
 import inspect
 
 
@@ -42,10 +42,10 @@ def capture_endpoint_errors(func: Callable) -> Callable:
 
         # Add function metadata
         tags['endpoint'] = func.__name__
-        tags['module'] = func.__module__
+        tags['module'] = getattr(func, '__module__', 'unknown')
 
         # Set Sentry context
-        with sentry_sdk.push_scope() as scope:
+        with sentry_sdk.new_scope() as scope:
             for key, value in tags.items():
                 scope.set_tag(key, value)
             scope.set_context("endpoint_args", context)

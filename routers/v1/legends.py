@@ -1,7 +1,8 @@
-from fastapi import Request, Response, APIRouter, Query
+import linkd
+from fastapi import APIRouter, Query
 from fastapi_cache.decorator import cache
-from utils.utils import db_client, fix_tag
-
+from utils.utils import fix_tag
+from utils.database import MongoClient
 
 
 router = APIRouter(tags=["Legends"])
@@ -9,10 +10,11 @@ router = APIRouter(tags=["Legends"])
 @router.get(path="/legends/clan/{clan_tag}/{date}",
             name="Legend stats for a members in a clan on a date")
 @cache(expire=300)
-async def legends_clan(clan_tag: str, date: str, request: Request, response: Response):
-    basic_clan = await db_client.basic_clan.find_one({"tag" : fix_tag(clan_tag)}, {"_id" : 0, "tag" : 1, "name" : 1, "members" : 1, "memberList" : 1, "level" : 1, "location" : 1})
+@linkd.ext.fastapi.inject
+async def legends_clan(clan_tag: str, date: str, *, mongo: MongoClient):
+    basic_clan = await mongo.basic_clan.find_one({"tag" : fix_tag(clan_tag)}, {"_id" : 0, "tag" : 1, "name" : 1, "members" : 1, "memberList" : 1, "level" : 1, "location" : 1})
     members = basic_clan.get("memberList")
-    legend_stats = await db_client.player_stats_db.find({"tag": {"$in" : [m.get("tag") for m in members]}}, projection={"name": 1, "townhall": 1, "legends": 1, "tag": 1, "_id" : 0}).to_list(length=None)
+    legend_stats = await mongo.player_stats_db.find({"tag": {"$in" : [m.get("tag") for m in members]}}, projection={"name": 1, "townhall": 1, "legends": 1, "tag": 1, "_id" : 0}).to_list(length=None)
 
     legend_stats_map = {l.get("tag") : l for l in legend_stats}
     new_member_list = []
@@ -36,9 +38,9 @@ async def legends_clan(clan_tag: str, date: str, request: Request, response: Res
 @router.get(path="/legends/streaks",
             name="Best legend streaks")
 @cache(expire=300)
-async def legend_streaks(request: Request, response: Response,
-                         limit: int = Query(ge=1, default=50, le=500)):
-    results = await db_client.player_stats_db.find({}, projection={"name": 1, "tag" : 1, "legends.streak": 1, "_id" : 0}).sort("legends.streak", -1).limit(limit).to_list(length=None)
+@linkd.ext.fastapi.inject
+async def legend_streaks(limit: int = Query(ge=1, default=50, le=500), *, mongo: MongoClient):
+    results = await mongo.player_stats_db.find({}, projection={"name": 1, "tag" : 1, "legends.streak": 1, "_id" : 0}).sort("legends.streak", -1).limit(limit).to_list(length=None)
     for rank, r in enumerate(results, 1):
         r["rank"] = rank
     return {"items" : results}
@@ -47,7 +49,8 @@ async def legend_streaks(request: Request, response: Response,
 @router.get(path="/legends/trophy-buckets",
             name="num of players in each trophy bucket")
 @cache(expire=300)
-async def trophy_bucket(request: Request, response: Response):
+@linkd.ext.fastapi.inject
+async def trophy_bucket(*, mongo: MongoClient):
     pipeline = [
         {'$bucket': {
             'groupBy': '$trophies',
@@ -55,13 +58,14 @@ async def trophy_bucket(request: Request, response: Response):
             'output': {'count': {'$sum': 1}}}
         }
     ]
-    results = await db_client.legend_rankings.aggregate(pipeline=pipeline).to_list(length=None)
+    results = await mongo.legend_rankings.aggregate(pipeline=pipeline).to_list(length=None)
     return {"items" : results}
 
 
 @router.get(path="/legends/eos-winners",
             name="#1 player for each month in legends since the beginning")
 @cache(expire=300)
-async def eos_winners(request: Request, response: Response):
-    results = await db_client.legend_history.find({"rank": 1}, {"_id" : 0}).sort("season", -1).to_list(length=None)
+@linkd.ext.fastapi.inject
+async def eos_winners(*, mongo: MongoClient):
+    results = await mongo.legend_history.find({"rank": 1}, {"_id" : 0}).sort("season", -1).to_list(length=None)
     return {"items" : results}

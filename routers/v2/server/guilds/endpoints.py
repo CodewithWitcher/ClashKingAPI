@@ -164,8 +164,8 @@ async def get_user_guilds(
     device_id: str = None,
     _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient = None,
-    rest: hikari.RESTApp = None
+    mongo: MongoClient,
+    rest: hikari.RESTApp
 ) -> List[GuildInfo]:
     """
     Fetch user's Discord guilds and check which ones have ClashKing bot.
@@ -223,8 +223,8 @@ async def get_guild_details(
     user_id: str = None,
     _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    _mongo: MongoClient = None,
-    rest: hikari.RESTApp = None
+    _mongo: MongoClient,
+    rest: hikari.RESTApp
 ) -> GuildDetails:
     """
     Fetch detailed information about a specific Discord guild/server.

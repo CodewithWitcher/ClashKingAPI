@@ -1,8 +1,9 @@
 """Helper functions for capital raids endpoints."""
 import logging
-from datetime import datetime
+import pendulum as pend
 from typing import Dict, List, Any, Tuple, Optional
 from fastapi import HTTPException
+from datetime import datetime
 
 from utils.database import MongoClient
 from utils.utils import fix_tag
@@ -81,12 +82,12 @@ def parse_season_dates(season: str) -> Tuple[datetime, datetime]:
     """
     try:
         year, month = season.split('-')
-        start_date = datetime(int(year), int(month), 1)
+        start_date = pend.datetime(int(year), int(month), 1, tz=pend.UTC)
 
         if int(month) == 12:
-            end_date = datetime(int(year) + 1, 1, 1)
+            end_date = pend.datetime(int(year) + 1, 1, 1, tz=pend.UTC)
         else:
-            end_date = datetime(int(year), int(month) + 1, 1)
+            end_date = pend.datetime(int(year), int(month) + 1, 1, tz=pend.UTC)
 
         return start_date, end_date
     except (ValueError, IndexError):

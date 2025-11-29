@@ -99,8 +99,8 @@ async def search_clan(
 
 
 @router.get("/search/{guild_id}/banned-players", name="Search for a banned player")
-@check_authentication
 @linkd.ext.fastapi.inject
+@check_authentication
 async def search_banned_players(
         query: str = Query(default=""),
         guild_id: int = 0,
@@ -139,8 +139,8 @@ async def search_banned_players(
 
 @router.post("/search/bookmark/{user_id}/{search_type}/{tag}",
              name="Add a bookmark for a clan or player for a user")
-@check_authentication
 @linkd.ext.fastapi.inject
+@check_authentication
 async def bookmark_search(
         user_id: int,
         search_type: int,
@@ -168,8 +168,8 @@ async def bookmark_search(
 
 @router.post("/search/recent/{user_id}/{search_type}/{tag}",
              name="Add a recent search for a clan or player for a user")
-@check_authentication
 @linkd.ext.fastapi.inject
+@check_authentication
 async def recent_search(
         user_id: int,
         search_type: int,
@@ -197,8 +197,8 @@ async def recent_search(
 
 @router.post("/search/groups/create/{user_id}/{name}/{search_type}",
              name="Create a player or clan group")
-@check_authentication
 @linkd.ext.fastapi.inject
+@check_authentication
 async def group_create(
         user_id: int,
         name: str,
@@ -276,8 +276,8 @@ async def group_remove(
 
 @router.get("/search/groups/{group_id}",
             name="Get a specific group")
-@check_authentication
 @linkd.ext.fastapi.inject
+@check_authentication
 async def group_get(
         group_id: str,
         _request: Request = Request,

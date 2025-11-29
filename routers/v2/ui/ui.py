@@ -4,7 +4,6 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 import linkd.ext.fastapi
 from bson import ObjectId
-from datetime import datetime
 from utils.database import MongoClient
 from routers.v2.rosters.utils import parse_th_restriction
 

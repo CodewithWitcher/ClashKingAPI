@@ -5,33 +5,41 @@ import uuid
 load_dotenv()
 import aiohttp
 from fastapi.responses import RedirectResponse
-from fastapi import Request, Response
 from fastapi import APIRouter
 from fastapi_cache.decorator import cache
 from typing import Dict
-from utils.utils import db_client, download_image, config, upload_to_cdn
+from utils.utils import download_image, upload_to_cdn
+from utils.database import MongoClient
+from utils.config import Config
 import matplotlib.pyplot as plt
 from PIL import Image
 from typing import List
 from fastapi.responses import HTMLResponse
 from coc.ext import discordlinks
+import linkd
 
 
 router = APIRouter(tags=["Utility"])
 
+config = Config()
+
+# Note: Link client initialization should be moved to main app's lifespan context
+# For now, keeping the global variable pattern but initialization will happen on first use
 link_client = None
-@router.on_event("startup")
-async def startup_event():
+
+async def get_link_client():
+    """Get or initialize the link client."""
     global link_client
-    link_client = await discordlinks.login(config.link_api_username, config.link_api_password)
+    if link_client is None:
+        link_client = await discordlinks.login(config.link_api_username, config.link_api_password)
+    return link_client
 
 #UTILS
 @router.post("/table",
          name="Custom Table",
          include_in_schema=False)
-async def table_renderer(info: Dict, request: Request, response: Response):
+async def table_renderer(info: Dict):
     columns = info.get("columns")
-    positions = info.get("positions")
     data = info.get("data")
     logo = info.get("logo")
     badge_columns = info.get("badge_columns")
@@ -71,30 +79,25 @@ async def table_renderer(info: Dict, request: Request, response: Response):
             )
 
     # -- Transformation functions
-    DC_to_FC = ax.transData.transform
-    FC_to_NFC = fig.transFigure.inverted().transform
+    dc_to_fc = ax.transData.transform
+    fc_to_nfc = fig.transFigure.inverted().transform
     # -- Take data coordinates and transform them to normalized figure coordinates
-    DC_to_NFC = lambda x: FC_to_NFC(DC_to_FC(x))
+    dc_to_nfc = lambda coords: fc_to_nfc(dc_to_fc(coords))
     # -- Add nation axes
-    ax_point_1 = DC_to_NFC([2.25, 0.25])
-    ax_point_2 = DC_to_NFC([2.75, 0.75])
-    ax_width = abs(ax_point_1[0] - ax_point_2[0])
-    ax_height = abs(ax_point_1[1] - ax_point_2[1])
+    ax_point_1 = dc_to_nfc([2.25, 0.25])
+    ax_point_2 = dc_to_nfc([2.75, 0.75])
+    badge_ax_width = abs(ax_point_1[0] - ax_point_2[0])
+    badge_ax_height = abs(ax_point_1[1] - ax_point_2[1])
 
-    for x in range(0, nrows):
-        ax_coords = DC_to_NFC([2.25, x + .25])
+    for row_idx in range(0, nrows):
+        ax_coords = dc_to_nfc([2.25, row_idx + .25])
         flag_ax = fig.add_axes(
-            [ax_coords[0], ax_coords[1], ax_width, ax_height]
+            (ax_coords[0], ax_coords[1], badge_ax_width, badge_ax_height)
         )
 
-        badge = await download_image(badge_columns[x])
+        badge = await download_image(badge_columns[row_idx])
         flag_ax.imshow(Image.open(badge))
         flag_ax.axis('off')
-
-    ax_point_1 = DC_to_NFC([4, 0.05])
-    ax_point_2 = DC_to_NFC([5, 0.95])
-    ax_width = abs(ax_point_1[0] - ax_point_2[0])
-    ax_height = abs(ax_point_1[1] - ax_point_2[1])
 
     # -- Add column names
     column_names = columns
@@ -129,9 +132,7 @@ async def table_renderer(info: Dict, request: Request, response: Response):
     ax.set_axis_off()
 
     # -- Final details
-    logo_ax = fig.add_axes(
-        [0.825, 0.89, .05, .05]
-    )
+    logo_ax = fig.add_axes((0.825, 0.89, .05, .05))
     club_icon = await download_image(logo)
     logo_ax.imshow(Image.open(club_icon))
     logo_ax.axis('off')
@@ -145,7 +146,7 @@ async def table_renderer(info: Dict, request: Request, response: Response):
     )
     temp = io.BytesIO()
     # plt.imshow(img,  aspect="auto")
-    background_ax = plt.axes([.10, .08, .85, .87])  # create a dummy subplot for the background
+    background_ax = plt.axes((.10, .08, .85, .87))  # create a dummy subplot for the background
     background_ax.set_zorder(-1)  # set the background subplot behind the others
     background_ax.axis("off")
     background_ax.imshow(img, aspect='auto')  # show the backgroud image
@@ -167,7 +168,7 @@ async def table_renderer(info: Dict, request: Request, response: Response):
          name="Get clans that are linked to a discord guild",
          include_in_schema=False)
 @cache(expire=300)
-async def guild_links(guild_id: int, request: Request, response: Response):
+async def guild_links():
     return {}
 
 
@@ -177,17 +178,19 @@ async def guild_links(guild_id: int, request: Request, response: Response):
 
 @router.get("/shortner",
          name="Create a short link", include_in_schema=False)
-async def shortner(url: str):
-    id = str(uuid.uuid4())
-    await db_client.link_shortner.insert_one({"_id" : id, "url" : url})
-    return {"url" : f"https://api.clashk.ing/shortlink?id={id}"}
+@linkd.ext.fastapi.inject
+async def shortner(url: str, *, mongo: MongoClient):
+    link_id = str(uuid.uuid4())
+    await mongo.link_shortner.insert_one({"_id" : link_id, "url" : url})
+    return {"url" : f"https://api.clashk.ing/shortlink?id={link_id}"}
 
 
 @router.get("/shortlink",
             response_class=RedirectResponse,
             name="Create a short link", include_in_schema=False)
-async def shortlink(id: str):
-    result = await db_client.link_shortner.find_one({"_id" : id})
+@linkd.ext.fastapi.inject
+async def shortlink(link_id: str, *, mongo: MongoClient):
+    result = await mongo.link_shortner.find_one({"_id" : link_id})
     return result.get("url")
 
 
@@ -196,23 +199,23 @@ async def shortlink(id: str):
          name="Render links to HTML as a page",
          include_in_schema=False)
 async def render(url: str):
-    async def fetch(u, session):
-        async with session.get(u) as response:
-            image_data = await response.read()
+    async def fetch(u, client_session):
+        async with client_session.get(u) as http_response:
+            image_data = await http_response.read()
             return image_data
 
-    async with aiohttp.ClientSession() as session:
-        response = await fetch(str(url), session)
-        await session.close()
-    return HTMLResponse(content=response, status_code=200)
+    async with aiohttp.ClientSession() as http_session:
+        content = await fetch(str(url), http_session)
+        await http_session.close()
+    return HTMLResponse(content=content, status_code=200)
 
 
 @router.post("/discord_links",
          name="Get discord links for tags",
          include_in_schema=False)
-async def discord_link(player_tags: List[str], request: Request, response: Response):
-    global link_client
-    result = await link_client.get_links(*player_tags)
+async def discord_link(player_tags: List[str]):
+    client = await get_link_client()
+    result = await client.get_links(*player_tags)
     return dict(result)
 
 

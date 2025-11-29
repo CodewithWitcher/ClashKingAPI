@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 import pendulum as pend
 import coc
 import calendar
@@ -24,7 +24,7 @@ def ts(date: pend.DateTime) -> DiscordTimeStamp:
     return DiscordTimeStamp(date=date)
 
 
-def time_difference(start: datetime, end: datetime):
+def time_difference(start: pend.DateTime, end: pend.DateTime):
     # Calculate the difference
     diff = end - start
 

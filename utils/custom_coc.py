@@ -1,9 +1,8 @@
-from typing import List, Optional, Type
+from typing import List, Type
 
 import coc
-import pendulum as pend
 from aiocache import SimpleMemoryCache, cached
-from coc import Clan, ClanWar, Location, Player, WarRound
+from coc import Clan, Location, Player
 import asyncio
 from typing import AsyncIterator, Iterable, Awaitable, Any
 
@@ -56,53 +55,54 @@ class CustomClashClient(coc.Client):
             clan_tags: list[str],
             cache: bool = True,
     ):
+        # TODO: Implement batch clan fetching similar to fetch_players
         pass
 
+    @staticmethod
     async def _run_tasks_stream(
-        self, coros: Iterable[Awaitable[Any]], *, return_exceptions: bool = False
+        coros: Iterable[Awaitable[Any]], *, return_exceptions: bool = False
     ) -> AsyncIterator[Any]:
 
-        BATCH_SIZE = 100
-        sem = asyncio.Semaphore(BATCH_SIZE)
+        batch_size = 100
+        sem = asyncio.Semaphore(batch_size)
 
-        async def run_with_sem(coro):
+        async def run_with_sem(awaitable):
             async with sem:
                 try:
-                    return await coro
+                    return await awaitable
                 except Exception as e:
                     if return_exceptions:
                         return e
                     raise
+
+        def add_tasks_to_flight(coro_iter, in_flight_set, count):
+            """Add up to 'count' tasks from iterator to in_flight set."""
+            for _ in range(count):
+                try:
+                    next_coro = next(coro_iter)
+                    in_flight_set.add(asyncio.create_task(run_with_sem(next_coro)))
+                except StopIteration:
+                    break
 
         it = iter(coros)
         in_flight: set[asyncio.Task] = set()
 
         # Prime up to concurrency
         try:
-            for _ in range(BATCH_SIZE):
-                try:
-                    coro = next(it)
-                except StopIteration:
-                    break
-                in_flight.add(asyncio.create_task(run_with_sem(coro)))
+            add_tasks_to_flight(it, in_flight, batch_size)
 
             while in_flight:
                 done, in_flight = await asyncio.wait(in_flight, return_when=asyncio.FIRST_COMPLETED)
 
                 # Yield all finished results
-                for t in done:
-                    yield t.result()  # may be an Exception if return_exceptions=True
+                for task in done:
+                    yield task.result()  # may be an Exception if return_exceptions=True
 
                 # Refill the window
-                for _ in range(len(done)):
-                    try:
-                        coro = next(it)
-                    except StopIteration:
-                        break
-                    in_flight.add(asyncio.create_task(run_with_sem(coro)))
+                add_tasks_to_flight(it, in_flight, len(done))
         finally:
             # If caller breaks early, cancel the rest
-            for t in in_flight:
-                t.cancel()
+            for task in in_flight:
+                task.cancel()
             if in_flight:
                 await asyncio.gather(*in_flight, return_exceptions=True)

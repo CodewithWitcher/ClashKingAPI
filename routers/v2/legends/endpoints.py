@@ -6,7 +6,8 @@ from fastapi import Request, Response, HTTPException, Depends
 from fastapi import APIRouter, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Annotated, List, Optional
-from datetime import timedelta, datetime
+from datetime import timedelta
+import pendulum as pend
 from utils.utils import remove_id_fields
 from utils.database import MongoClient, OldMongoClient
 from utils.security import check_authentication
@@ -426,8 +427,8 @@ async def get_legends_daily_tracking(
 
     # Parse dates
     try:
-        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+        start_dt = pend.parse(start_date)
+        end_dt = pend.parse(end_date)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
 

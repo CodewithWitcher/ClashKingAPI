@@ -7,7 +7,7 @@ from fastapi_cache.decorator import cache
 from typing import List
 from utils.utils import fix_tag, leagues
 from utils.database import MongoClient
-from datetime import datetime
+import pendulum as pend
 import linkd
 
 
@@ -22,8 +22,8 @@ router = APIRouter(tags=["Clan Capital Endpoints"])
 @cache(expire=8000000)
 @linkd.ext.fastapi.inject
 async def capital_stats_district(weekend: str, *, mongo: MongoClient):
-    weekend_to_iso = datetime.strptime(weekend, "%Y-%m-%d")
-    if (datetime.now() - weekend_to_iso).total_seconds() <= 273600:
+    weekend_to_iso = pend.parse(weekend)
+    if (pend.now(tz=pend.UTC) - weekend_to_iso).total_seconds() <= 273600:
         raise HTTPException(status_code=404, detail="Please wait until 4 hours after Raid Weekend is completed to collect stats")
     weekend_to_iso = weekend_to_iso.replace(hour=7)
     weekend = weekend_to_iso.strftime('%Y%m%dT%H%M%S.000Z')
@@ -59,8 +59,8 @@ async def capital_stats_district(weekend: str, *, mongo: MongoClient):
 @linkd.ext.fastapi.inject
 async def capital_stats_leagues(weekend: str, *, mongo: MongoClient):
     og_weekend = weekend
-    weekend_to_iso = datetime.strptime(weekend, "%Y-%m-%d")
-    if (datetime.now() - weekend_to_iso).total_seconds() <= 273600:
+    weekend_to_iso = pend.parse(weekend)
+    if (pend.now(tz=pend.UTC) - weekend_to_iso).total_seconds() <= 273600:
         raise HTTPException(status_code=404, detail="Please wait until 4 hours after Raid Weekend is completed to collect stats")
     weekend_to_iso = weekend_to_iso.replace(hour=7)
     weekend = weekend_to_iso.strftime('%Y%m%dT%H%M%S.000Z')

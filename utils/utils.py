@@ -2,10 +2,9 @@ import asyncio
 import base64
 import io
 import os
-import random
-import re
+import secrets
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 from json import loads as json_loads
 
 import aiohttp
@@ -13,12 +12,10 @@ import coc
 import orjson
 import pendulum as pend
 import pytz
-import redis
 from bson import json_util
 from dotenv import load_dotenv
 from fastapi import HTTPException
 from hashids import Hashids
-from redis import asyncio as aioredis
 from slowapi import Limiter
 from slowapi.util import get_ipaddr
 
@@ -76,7 +73,7 @@ def gen_clean_custom_id():
     hashids = Hashids(min_length=7)
     custom_id = hashids.encode(
         pend.now(tz=pend.UTC).int_timestamp
-        + random.randint(1000000000, 9999999999)
+        + secrets.randbelow(9000000000) + 1000000000
     )
     return custom_id
 
@@ -107,7 +104,7 @@ def gen_games_season():
 
 
 def gen_raid_date():
-    now = datetime.utcnow().replace(tzinfo=pend.UTC)
+    now = pend.now(tz=pend.UTC)
     current_dayofweek = now.weekday()
     if (
         (current_dayofweek == 4 and now.hour >= 7)
@@ -118,33 +115,33 @@ def gen_raid_date():
         if current_dayofweek == 0:
             current_dayofweek = 7
         fallback = current_dayofweek - 4
-        raidDate = (now - timedelta(fallback)).date()
-        return str(raidDate)
+        raid_date = now.subtract(days=fallback).date()
+        return str(raid_date)
     else:
         forward = 4 - current_dayofweek
-        raidDate = (now + timedelta(forward)).date()
-        return str(raidDate)
+        raid_date = now.add(days=forward).date()
+        return str(raid_date)
 
 
 def gen_legend_date():
-    now = datetime.utcnow()
+    now = pend.now(tz=pend.UTC)
     hour = now.hour
     if hour < 5:
-        date = (now - timedelta(1)).date()
+        date = now.subtract(days=1).date()
     else:
         date = now.date()
     return str(date)
 
 
 async def token_verify(
-    server_id: int, api_token: str, only_admin: bool = False
+    server_id: int, api_token: str, mongo, only_admin: bool = False
 ):
     if api_token is None:
         raise HTTPException(status_code=403, detail='API Token is required')
     server_lookup = [1103679645439754335]
     if not only_admin:
         server_lookup.append(server_id)
-    results = await db_client.server_db.find(
+    results = await mongo.server_db.find(
         {'server': {'$in': [server_id, 1103679645439754335]}}
     ).to_list(length=None)
     tokens = [r.get('ck_api_token') for r in results]
@@ -193,12 +190,12 @@ async def upload_to_cdn(title: str, picture=None, image=None):
         payload = await image.read()
     title = title.replace(' ', '_').lower()
     async with aiohttp.ClientSession() as session:
-        async with session.put(
+        await session.put(
             url=f'https://storage.bunnycdn.com/clashking-files/{title}.png',
             headers=headers,
             data=payload,
-        ) as response:
-            await session.close()
+        )
+        await session.close()
     return f'https://cdn.clashking.xyz/{title}.png'
 
 
@@ -223,7 +220,6 @@ async def delete_from_cdn(image_url: str):
                 return {
                     'status': 'success',
                     'message': f'File {file_path} deleted.',
-                    'purge_response': purge_response,
                 }
             else:
                 return {
@@ -236,21 +232,21 @@ def remove_id_fields(data):
     return json_loads(json_util.dumps(data))
 
 
-async def validate_token(token, expected_type=None):
+async def validate_token(token, mongo, expected_type=None):
     """
     Validate a token and return its data if valid.
     """
-    token_data = await db_client.tokens.find_one({'token': token})
+    token_data = await mongo.tokens.find_one({'token': token})
 
     if not token_data:
         raise ValueError('Invalid token.')
 
-    # Vérifier si le token a expiré
-    if token_data['expires_at'] < datetime.utcnow():
-        await db_client.tokens.delete_one({'token': token})  # Nettoyer
+    # Verify expiration
+    if token_data['expires_at'] < pend.now(tz=pend.UTC):
+        await mongo.tokens.delete_one({'token': token})  # cleanup expired token
         raise ValueError('Token expired.')
 
-    # Vérifier si le type correspond (si applicable)
+    # VERIFY type if expected_type is provided
     if expected_type and token_data['type'] != expected_type:
         raise ValueError(
             f"Expected token of type '{expected_type}', but got '{token_data['type']}'."
@@ -259,20 +255,19 @@ async def validate_token(token, expected_type=None):
     return token_data
 
 
-def utc_to_local(utc_time: datetime, timezone: str = 'Europe/Paris') -> str:
+def utc_to_local(utc_time: pend.DateTime, timezone: str = 'Europe/Paris') -> str:
     """
     Convert UTC datetime to local datetime string in a specified timezone.
 
     Args:
-        utc_time (datetime): UTC datetime object.
+        utc_time (pend.DateTime): UTC datetime object.
         timezone (str): Timezone string (e.g., "Europe/Paris").
 
     Returns:
         str: Formatted local time as string "YYYY-MM-DD HH:MM".
     """
-    local_tz = pytz.timezone(timezone)
-    utc_dt = utc_time.replace(tzinfo=pytz.utc)
-    local_dt = utc_dt.astimezone(local_tz)
+    # Convert to specified timezone
+    local_dt = utc_time.in_timezone(timezone)
     return local_dt.strftime('%Y-%m-%d %H:%M')  # Format for display
 
 
@@ -316,14 +311,13 @@ async def generate_access_token(
     await mongo_client.tokens_db.insert_one(token_data)
 
     # Generate dashboard URL based on token type and environment
-    from utils.config import Config
-    config = Config()
-    
-    if config.is_local:
+    is_local = os.getenv('IS_LOCAL', 'false').lower() == 'true'
+
+    if is_local:
         base_url = 'http://localhost:8000'
     else:
         base_url = 'https://api.clashk.ing'
-    
+
     dashboard_url = f'{base_url}/ui/{token_type}/dashboard?token={token}'
 
     return {
@@ -334,10 +328,10 @@ async def generate_access_token(
 
 
 async def bulk_requests(urls: list[str]):
-    async def fetch_function(session: aiohttp.ClientSession, url: str):
-        url = url.replace('#', '%23')
-        async with session.get(
-            f'https://proxy.clashk.ing/v1/{url}'
+    async def fetch_function(http_session: aiohttp.ClientSession, endpoint: str):
+        encoded_endpoint = endpoint.replace('#', '%23')
+        async with http_session.get(
+            f'https://proxy.clashk.ing/v1/{encoded_endpoint}'
         ) as response:
             if response.status != 200:
                 return None
@@ -357,13 +351,13 @@ async def bulk_requests(urls: list[str]):
 
 def generate_custom_id(input_number: int = None):
     # Use input_number if provided, otherwise generate a random number
-    base_input = input_number or random.randint(1000000000, 9999999999)
+    base_input = input_number or (secrets.randbelow(9000000000) + 1000000000)
 
     # Combine with current UTC timestamp to get a unique ID
     base_number = (
         base_input
         + int(pend.now(tz=pend.UTC).timestamp())
-        + random.randint(1000000000, 9999999999)
+        + secrets.randbelow(9000000000) + 1000000000
     )
 
     return base_number

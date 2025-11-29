@@ -4,7 +4,7 @@ Discord API utilities for fetching server information.
 
 import aiohttp
 import asyncio
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from utils.config import Config
 
@@ -23,6 +23,50 @@ class DiscordAPI:
         self._rate_limit_lock = asyncio.Lock()
         self._last_request_time = 0
         self._min_request_interval = 0.5  # Minimum 500ms between requests
+
+    @staticmethod
+    def _create_category_map(channels: List[Dict]) -> Dict[str, str]:
+        """Create a map of category IDs to category names."""
+        category_map = {}
+        for channel in channels:
+            if channel.get('type') == 4:  # Category type
+                category_map[str(channel['id'])] = channel['name']
+        return category_map
+
+    @staticmethod
+    def _create_channel_display_names(channel: Dict, category_name: Optional[str]) -> tuple[str, str]:
+        """Create display names for a channel."""
+        if category_name:
+            display_name = f"#{channel['name']} ({category_name})"
+            full_display_name = f"{category_name} > #{channel['name']}"
+        else:
+            display_name = f"#{channel['name']}"
+            full_display_name = f"#{channel['name']}"
+        return display_name, full_display_name
+
+    def _filter_writable_channels(self, all_channels: List[Dict], category_map: Dict[str, str]) -> List[Dict]:
+        """Filter for writable channels (text, announcement, forum) and format them."""
+        writable_channels = []
+        for channel in all_channels:
+            # Filter for text channels (type 0), announcement channels (type 5), and forum channels (type 15)
+            if channel.get('type') in [0, 5, 15]:
+                category_id = channel.get('parent_id')
+                category_name = category_map.get(str(category_id)) if category_id else None
+
+                display_name, full_display_name = self._create_channel_display_names(channel, category_name)
+
+                writable_channels.append({
+                    'id': str(channel['id']),
+                    'name': channel['name'],
+                    'type': channel['type'],
+                    'mention': f"<#{channel['id']}>",
+                    'display_name': display_name,
+                    'full_display_name': full_display_name,
+                    'category_id': str(category_id) if category_id else None,
+                    'category_name': category_name,
+                    'position': channel.get('position', 0)
+                })
+        return writable_channels
 
     async def get_channels(self, server_id: int, use_cache: bool = True) -> Dict:
         """
@@ -49,39 +93,9 @@ class DiscordAPI:
         # Fetch channels from Discord API
         all_channels = await self._fetch_channels_from_api(server_id)
 
-        # Create a map of category IDs to category names
-        category_map = {}
-        for channel in all_channels:
-            if channel.get('type') == 4:  # Category type
-                category_map[str(channel['id'])] = channel['name']
-
-        # Filter for text channels and announcement channels that support writing
-        writable_channels = []
-        for channel in all_channels:
-            # Filter for text channels (type 0), announcement channels (type 5), and forum channels (type 15)
-            if channel.get('type') in [0, 5, 15]:
-                category_id = channel.get('parent_id')
-                category_name = category_map.get(str(category_id)) if category_id else None
-
-                # Create display name with category if available
-                if category_name:
-                    display_name = f"#{channel['name']} ({category_name})"
-                    full_display_name = f"{category_name} > #{channel['name']}"
-                else:
-                    display_name = f"#{channel['name']}"
-                    full_display_name = f"#{channel['name']}"
-
-                writable_channels.append({
-                    'id': str(channel['id']),
-                    'name': channel['name'],
-                    'type': channel['type'],
-                    'mention': f"<#{channel['id']}>",
-                    'display_name': display_name,
-                    'full_display_name': full_display_name,
-                    'category_id': str(category_id) if category_id else None,
-                    'category_name': category_name,
-                    'position': channel.get('position', 0)
-                })
+        # Create category map and filter writable channels
+        category_map = self._create_category_map(all_channels)
+        writable_channels = self._filter_writable_channels(all_channels, category_map)
 
         # Sort and categorize channels
         categorized_channels = self._categorize_channels(writable_channels)
@@ -96,10 +110,11 @@ class DiscordAPI:
         self._channels_cache[server_id] = result
         return result
 
-    def _categorize_channels(self, channels: List[Dict]) -> Dict:
+    @staticmethod
+    def _categorize_channels(channels: List[Dict]) -> Dict:
         """Sort and categorize channels by priority."""
-        def get_channel_priority(channel):
-            name = channel['name'].lower()
+        def get_channel_priority(chan):
+            name = chan['name'].lower()
 
             # High priority for common automation channels
             if any(keyword in name for keyword in [
@@ -144,13 +159,13 @@ class DiscordAPI:
 
         return categorized_channels
 
-    async def _get_session(self) -> aiohttp.ClientSession:
+    def _get_session(self) -> aiohttp.ClientSession:
         """Get or create a reusable HTTP session."""
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
         return self._session
 
-    async def _make_request(self, url: str, max_retries: int = 3) -> dict:
+    async def _make_request(self, url: str, max_retries: int = 3) -> Union[dict, list]:
         """
         Make a rate-limited HTTP request to Discord API with retry logic.
 
@@ -169,7 +184,7 @@ class DiscordAPI:
             'Content-Type': 'application/json'
         }
 
-        session = await self._get_session()
+        session = self._get_session()
 
         for attempt in range(max_retries):
             # Rate limiting: ensure minimum interval between requests

@@ -1,17 +1,18 @@
-from fastapi_mail import FastMail, MessageSchema, ConnectionConfig
+from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
 from fastapi_mail.errors import ConnectionErrors
 from fastapi import HTTPException
 import sentry_sdk
 from jinja2 import Template
 import os
+from pydantic import EmailStr, SecretStr
 
 
 # Email configuration with validation
 def get_email_config():
     return ConnectionConfig(
-        MAIL_USERNAME=os.getenv('SMTP_USERNAME'),
-        MAIL_PASSWORD=os.getenv('SMTP_PASSWORD'),
-        MAIL_FROM=os.getenv('SMTP_FROM'),
+        MAIL_USERNAME=os.getenv('SMTP_USERNAME') or '',
+        MAIL_PASSWORD=SecretStr(os.getenv('SMTP_PASSWORD') or ''),
+        MAIL_FROM=EmailStr(os.getenv('SMTP_FROM') or 'noreply@clashk.ing'),
         MAIL_PORT=int(os.getenv('SMTP_PORT', '587')),
         MAIL_SERVER=os.getenv('SMTP_SERVER', 'smtp.gmail.com'),
         MAIL_STARTTLS=os.getenv('SMTP_STARTTLS', 'true').lower() == 'true',
@@ -180,9 +181,9 @@ async def send_verification_email(email: str, username: str, verification_code: 
         # Create message
         message = MessageSchema(
             subject="Your ClashKing Verification Code",
-            recipients=[email],
+            recipients=[EmailStr(email)],
             body=html_content,
-            subtype="html",
+            subtype=MessageType.html,
             headers={
                 "X-Priority": "1",
                 "X-MSMail-Priority": "High",
@@ -219,9 +220,9 @@ async def send_password_reset_email_with_code(email: str, username: str, reset_c
         # Create message
         message = MessageSchema(
             subject="Reset Your ClashKing Password",
-            recipients=[email],
+            recipients=[EmailStr(email)],
             body=html_content,
-            subtype="html",
+            subtype=MessageType.html,
             headers={
                 "X-Priority": "1",
                 "X-MSMail-Priority": "High",

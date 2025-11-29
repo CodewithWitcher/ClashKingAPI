@@ -1,9 +1,8 @@
-import ujson
+import orjson
+import aiofiles
 
-from fastapi import Request, Response
 from fastapi import APIRouter
 from fastapi_cache.decorator import cache
-
 
 
 router = APIRouter(tags=["Leagues"])
@@ -13,10 +12,11 @@ router = APIRouter(tags=["Leagues"])
          tags=["Leagues"],
          name="Builder Base Leagues w/ Icons")
 @cache(expire=300)
-async def builder_base_leagues(request: Request, response: Response):
+async def builder_base_leagues():
     file_path = "assets/json/builder_league.json"
-    with open(file_path) as json_file:
-        data = ujson.load(json_file)
+    async with aiofiles.open(file_path, 'rb') as json_file:
+        content = await json_file.read()
+        data = orjson.loads(content)
         for item in data.get("items"):
             league = item.get("name")
             split = league.split(" ")

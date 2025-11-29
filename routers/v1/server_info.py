@@ -1,7 +1,8 @@
 import json
-from fastapi import  Request, Response, HTTPException
-from fastapi import APIRouter
-from utils.utils import  db_client, token_verify
+from fastapi import HTTPException, APIRouter
+from utils.utils import token_verify
+from utils.database import MongoClient
+import linkd
 
 from bson import json_util
 
@@ -10,8 +11,9 @@ router = APIRouter(tags=["Server Settings"], include_in_schema=False)
 
 @router.get("/server-settings/{server_id}",
          name="Settings on a server")
-async def server_settings(server_id: int, request: Request, response: Response, api_token: str):
-    await token_verify(server_id=server_id, api_token=api_token)
+@linkd.ext.fastapi.inject
+async def server_settings(server_id: int, api_token: str, *, mongo: MongoClient):
+    await token_verify(server_id=server_id, api_token=api_token, mongo=mongo)
     pipeline = [
         {"$match": {"server": server_id}},
         {"$lookup": {"from": "legendleagueroles", "localField": "server", "foreignField": "server", "as": "eval.league_roles"}},
@@ -25,7 +27,7 @@ async def server_settings(server_id: int, request: Request, response: Response, 
         {"$lookup": {"from": "builderleagueroles", "localField": "server", "foreignField": "server", "as": "eval.builder_league_roles"}},
         {"$lookup": {"from": "clans", "localField": "server", "foreignField": "server", "as": "clans"}},
     ]
-    results = await db_client.server_db.aggregate(pipeline).to_list(length=1)
+    results = await mongo.server_db.aggregate(pipeline).to_list(length=1)
     if not results:
         raise HTTPException(status_code=404, detail="Server Not Found")
     results = json.loads(json_util.dumps(results[0]))

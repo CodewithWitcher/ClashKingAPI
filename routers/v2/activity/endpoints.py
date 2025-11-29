@@ -31,8 +31,8 @@ router = APIRouter(prefix="/v2/activity", tags=["Activity & Inactivity"], includ
 @router.get("/guild-summary",
             name="Get guild activity summary",
             response_model=GuildActivitySummary)
+
 @linkd.ext.fastapi.inject
-@check_authentication
 @capture_endpoint_errors
 async def get_guild_activity_summary(
     guild_id: int,

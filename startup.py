@@ -34,34 +34,41 @@ from fastapi.responses import JSONResponse
 from coc.errors import HTTPException
 
 def define_app(app: FastAPI):
-
-    #include_routers(app, os.path.join(os.path.dirname(__file__), "routers", "v2"), recursive=True)
-    app.include_router(config_router)
-    app.include_router(rosters_router)
-    app.include_router(accounts_router)
-    app.include_router(auth_router)
-    app.include_router(dates_router)
-    app.include_router(war_router)
-    app.include_router(ui_router)
-    app.include_router(guilds_router)
-    app.include_router(guild_router)
-    app.include_router(server_router)
-    app.include_router(server_logs_router)
-    app.include_router(server_reminders_router)
-    app.include_router(server_links_router)
-    app.include_router(server_autoboards_router)
-    app.include_router(server_clans_router)
-    app.include_router(server_roles_router)
-    app.include_router(server_strikes_router)
-    app.include_router(server_bans_router)
-    app.include_router(capital_router)
-    app.include_router(activity_router)
-    app.include_router(legends_router)
-    app.include_router(mobile_router)
+    # V2 Routers
+    v2_routers = [
+        config_router,
+        rosters_router,
+        accounts_router,
+        auth_router,
+        dates_router,
+        war_router,
+        ui_router,
+        guilds_router,
+        guild_router,
+        server_router,
+        server_logs_router,
+        server_reminders_router,
+        server_links_router,
+        server_autoboards_router,
+        server_clans_router,
+        server_roles_router,
+        server_strikes_router,
+        server_bans_router,
+        capital_router,
+        activity_router,
+        legends_router,
+        mobile_router,
+    ]
 
     # V1 Routers
-    app.include_router(v1_clan_router)
-    app.include_router(v1_capital_router)
+    v1_routers = [
+        v1_clan_router,
+        v1_capital_router,
+    ]
+
+    # Include all routers
+    for router in v2_routers + v1_routers:
+        app.include_router(router)
 
     description = textwrap.dedent("""
     ### Clash of Clans Based API 👑
@@ -83,7 +90,7 @@ def define_app(app: FastAPI):
     )
 
     @app.exception_handler(HTTPException)
-    async def coc_exception_handler(request: Request, exc: HTTPException):
+    async def coc_exception_handler(_request: Request, exc: HTTPException):
         # coc.py exceptions usually expose these; fall back safely
         # `text` often contains the API’s error JSON/string; use str(exc) as last resort
         detail = getattr(exc, "text", str(exc))
@@ -101,13 +108,13 @@ def define_app(app: FastAPI):
         )
 
 
-def include_routers(app, directory, recursive=False):
+def include_routers(app, directory: str, recursive: bool = False):
     """Include routers from a given directory. If recursive is True, search for 'endpoints.py' in subdirectories."""
     for root, _, files in os.walk(directory) if recursive else [(directory, [], os.listdir(directory))]:
         for filename in files:
             if filename == "endpoints.py" if recursive else filename.endswith(".py") and not filename.startswith("__"):
-                module_name = os.path.relpath(os.path.join(root, filename), start=directory).replace(os.sep, ".")[:-3]
-                file_path = os.path.join(root, filename)
+                file_path = os.path.join(str(root), filename)
+                module_name = os.path.relpath(file_path, start=directory).replace(os.sep, ".")[:-3]
 
                 spec = importlib.util.spec_from_file_location(module_name, file_path)
                 module = importlib.util.module_from_spec(spec)

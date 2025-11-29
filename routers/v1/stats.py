@@ -2,14 +2,17 @@
 import coc
 
 from collections import defaultdict
-from fastapi import  Request, Response, APIRouter, Query
+from fastapi import APIRouter, Query
 from fastapi_cache.decorator import cache
 from typing import List, Annotated
-from utils.utils import fix_tag, db_client, gen_season_date, gen_games_season, gen_raid_date
+from utils.utils import fix_tag, gen_season_date, gen_games_season, gen_raid_date
+from utils.database import MongoClient
 from statistics import mean, median
-from datetime import datetime, timedelta
-from pytz import utc
+from datetime import timedelta
 from dotenv import load_dotenv
+from routers.v1.player import generate_war_unique_id
+import pendulum as pend
+import linkd
 load_dotenv()
 
 
@@ -21,8 +24,8 @@ coc_client = coc.Client(key_names="keys for my windows pc", key_count=5, raw_att
 @router.get("/donations",
          name="Donation Stats", include_in_schema=False)
 @cache(expire=300)
-async def donations(request: Request, response: Response,
-                           players: Annotated[List[str], Query(max_length=50)]=None,
+@linkd.ext.fastapi.inject
+async def donations(players: Annotated[List[str], Query(max_length=50)]=None,
                            clans: Annotated[List[str], Query(max_length=25)]=None,
                            server: int =None,
                            sort_field: str = "donations",
@@ -30,23 +33,25 @@ async def donations(request: Request, response: Response,
                            season: str = None,
                            tied_only: bool = True,
                            descending: bool = True,
-                           limit: int = 50):
+                           limit: int = 50,
+                           *,
+                           mongo: MongoClient):
     limit = min(limit, 500)
     season = gen_season_date() if season is None else season
     if server:
-        clans = await db_client.clans_db.distinct("tag", filter={"server" : server})
+        clans = await mongo.clans_db.distinct("tag", filter={"server" : server})
 
     new_data = []
     clan_to_name = {}
     by_clan = defaultdict(lambda : defaultdict(int))
     field_to_use = "donations" if sort_field != "donationsReceived" else "donationsReceived"
 
-    if players == clans == server == None:
-        rank_results = await db_client.rankings.find({"donationsRank" : {"$ne" : None}}, {"_id" : 1, "name" : 1, "donations" : 1, "donationsRank" : 1, "donationsReceived" : 1})\
+    if players is None and clans is None and server is None:
+        rank_results = await mongo.rankings.find({"donationsRank" : {"$ne" : None}}, {"_id" : 1, "name" : 1, "donations" : 1, "donationsRank" : 1, "donationsReceived" : 1})\
             .sort("donationsRank", 1).limit(limit=limit).to_list(length=None)
         pipeline = [{"$match": {"tag": {"$in": [i.get("_id") for i in rank_results]}}},
                     {"$group": {"_id": "$tag", "th": {"$last": "$townhall"}}}]
-        th_results = await db_client.attack_db.aggregate(pipeline).to_list(length=None)
+        th_results = await mongo.attack_db.aggregate(pipeline).to_list(length=None)
         th_results = {item.get("_id"): item.get("th") for item in th_results}
         for r in rank_results:
             new_data.append({
@@ -58,7 +63,7 @@ async def donations(request: Request, response: Response,
                 "donationsReceived" : r.get("donationsReceived")
             })
     elif players:
-            stat_results = await db_client.player_stats_db.find({"tag": {"$in": [fix_tag(player) for player in players]}},
+            stat_results = await mongo.player_stats_db.find({"tag": {"$in": [fix_tag(player) for player in players]}},
                                                       {"tag": 1, "name": 1, "donations": 1, "townhall": 1, "clan_tag": 1}).to_list(length=None)
             player_struct = {m.get("tag"): {"tag": m.get("tag"), "name": m.get("name"), "rank": 0,
                                             "donations": m.get("donations", {}).get(season, {}).get("donated", 0),
@@ -66,14 +71,14 @@ async def donations(request: Request, response: Response,
                                             "clan_tag": m.get("clan_tag")} for m in stat_results}
             for tag in players:
                 tag = fix_tag(tag)
-                p_results = await db_client.clan_stats.find({f"{season}.{tag}" : {"$ne" : None}}, {f"{season}.{tag}" : 1, "tag" : 1}).to_list(length=None)
+                p_results = await mongo.clan_stats.find({f"{season}.{tag}" : {"$ne" : None}}, {f"{season}.{tag}" : 1, "tag" : 1}).to_list(length=None)
                 for result in p_results:
                     by_clan[result.get("tag")][field_to_use] += result.get(season).get(tag).get("received" if field_to_use != "donations" else "donated", 0)
 
             new_data = list(player_struct.values())
 
     elif clans:
-        clan_members = await db_client.basic_clan.find({"tag" : {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
+        clan_members = await mongo.basic_clan.find({"tag" : {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
         clan_to_name = {c.get("tag") : c.get("name") for c in clan_members}
         member_tags = []
         member_to_name = {}
@@ -84,9 +89,9 @@ async def donations(request: Request, response: Response,
             for m in member_list:
                 member_to_clan_tag[m.get("tag")] = c.get("tag")
                 member_to_name[m.get("tag")] = m.get("name")
-        stat_results = await db_client.clan_stats.find({"tag": {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
+        stat_results = await mongo.clan_stats.find({"tag": {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
         player_struct = {tag : {"tag" : tag, "name" : member_to_name.get(tag), "rank" : 0, "donations" : 0, "donationsReceived" : 0, "townhall" : 0, "clan_tag" : None} for tag in member_tags}
-        member_data = await db_client.player_stats_db.find({"tag" : {"$in" : member_tags}}, {"tag" : 1, "donations" : 1, "townhall" : 1}).to_list(length=None)
+        member_data = await mongo.player_stats_db.find({"tag" : {"$in" : member_tags}}, {"tag" : 1, "donations" : 1, "townhall" : 1}).to_list(length=None)
         for member in member_data:
             if not tied_only:
                 player_struct[member.get("tag")]["donations"] = member.get("donations", {}).get(season, {}).get("donated", 0)
@@ -130,7 +135,7 @@ async def donations(request: Request, response: Response,
     print()
     by_clan_totals = []
     if not clan_to_name:
-        clan_results = await db_client.basic_clan.find({"tag": {"$in": list(by_clan.keys())}}).to_list(length=None)
+        clan_results = await mongo.basic_clan.find({"tag": {"$in": list(by_clan.keys())}}).to_list(length=None)
         clan_to_name = {c.get("tag"): c.get("name") for c in clan_results}
     print(clan_to_name)
     for k, v in by_clan.items():
@@ -148,8 +153,8 @@ async def donations(request: Request, response: Response,
 @router.get("/activity",
          name="Activity Stats", include_in_schema=False)
 @cache(expire=300)
-async def activity(request: Request, response: Response,
-                           players: Annotated[List[str], Query(max_length=50)]=None,
+@linkd.ext.fastapi.inject
+async def activity(players: Annotated[List[str], Query(max_length=50)]=None,
                            clans: Annotated[List[str], Query(max_length=25)]=None,
                            server: int =None,
                            sort_field: str = "activity",
@@ -157,18 +162,20 @@ async def activity(request: Request, response: Response,
                            season: str = None,
                            tied_only: bool = True,
                            descending: bool = True,
-                           limit: int = 50):
+                           limit: int = 50,
+                           *,
+                           mongo: MongoClient):
     limit = min(limit, 500)
     season = gen_season_date() if season is None else season
     if server:
-        clans = await db_client.clans_db.distinct("tag", filter={"server" : server})
+        clans = await mongo.clans_db.distinct("tag", filter={"server" : server})
 
     new_data = []
     clan_to_name = {}
     by_clan = defaultdict(lambda : defaultdict(int))
 
     if players:
-        stat_results = await db_client.player_stats_db.find({"tag" : {"$in" : [fix_tag(player) for player in players]}},
+        stat_results = await mongo.player_stats_db.find({"tag" : {"$in" : [fix_tag(player) for player in players]}},
                                                   {"tag" : 1, "name" : 1, "activity" : 1, "townhall" : 1, "last_online" : 1, "clan_tag" : 1}).to_list(length=None)
         player_struct = {m.get("tag") : {"tag" : m.get("tag"), "name" : m.get("name"), "rank" : 0,
                                          "activity" : m.get("activity", {}).get(season, 0),
@@ -178,7 +185,7 @@ async def activity(request: Request, response: Response,
         for data in new_data:
             by_clan[data.get("clan_tag")]["activity"] += data.get("activity")
     elif clans:
-        clan_members = await db_client.basic_clan.find({"tag" : {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
+        clan_members = await mongo.basic_clan.find({"tag" : {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
         clan_to_name = {c.get("tag") : c.get("name") for c in clan_members}
         member_tags = []
         member_to_name = {}
@@ -187,9 +194,9 @@ async def activity(request: Request, response: Response,
             member_tags += [m.get("tag") for m in member_list]
             for m in member_list:
                 member_to_name[m.get("tag")] = m.get("name")
-        stat_results = await db_client.clan_stats.find({"tag": {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
+        stat_results = await mongo.clan_stats.find({"tag": {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
         player_struct = {tag : {"tag" : tag, "name" : member_to_name.get(tag), "rank" : 0, "activity" : 0, "last_online" : 0, "townhall" : 0} for tag in member_tags}
-        member_data = await db_client.player_stats_db.find({"tag" : {"$in" : member_tags}}, {"tag" : 1, "name" : 1, "activity" : 1, "townhall" : 1, "last_online" : 1, "clan_tag" : None}).to_list(length=None)
+        member_data = await mongo.player_stats_db.find({"tag" : {"$in" : member_tags}}, {"tag" : 1, "name" : 1, "activity" : 1, "townhall" : 1, "last_online" : 1, "clan_tag" : None}).to_list(length=None)
         for member in member_data:
             if not tied_only:
                 player_struct[member.get("tag")]["activity"] = member.get("activity", {}).get(season, 0)
@@ -231,7 +238,7 @@ async def activity(request: Request, response: Response,
 
     by_clan_totals = []
     if not clan_to_name:
-        clan_results = await db_client.basic_clan.find({"tag": {"$in": list(by_clan.keys())}}).to_list(length=None)
+        clan_results = await mongo.basic_clan.find({"tag": {"$in": list(by_clan.keys())}}).to_list(length=None)
         clan_to_name = {c.get("tag"): c.get("name") for c in clan_results}
     for k, v in by_clan.items():
         if clan_to_name.get(k) is None:
@@ -245,8 +252,8 @@ async def activity(request: Request, response: Response,
 @router.get("/clan-games",
          name="Clan Game Stats", include_in_schema=False)
 @cache(expire=300)
-async def clan_games(request: Request, response: Response,
-                           players: Annotated[List[str], Query(max_length=50)]=None,
+@linkd.ext.fastapi.inject
+async def clan_games(players: Annotated[List[str], Query(max_length=50)]=None,
                            clans: Annotated[List[str], Query(max_length=25)]=None,
                            server: int =None,
                            sort_field: str = "points",
@@ -254,16 +261,18 @@ async def clan_games(request: Request, response: Response,
                            season: str = None,
                            tied_only: bool = True,
                            descending: bool = True,
-                           limit: int = 50):
+                           limit: int = 50,
+                           *,
+                           mongo: MongoClient):
     limit = min(limit, 500)
     season = gen_games_season() if season is None else season
     if server:
-        clans = await db_client.clans_db.distinct("tag", filter={"server" : server})
-    check_time = int(datetime.now().timestamp())
+        clans = await mongo.clans_db.distinct("tag", filter={"server" : server})
+    check_time = int(pend.now(tz=pend.UTC).timestamp())
     current_season = gen_season_date()
     if season != current_season:
         split_season = season.split("-")
-        check_time  = int(datetime(int(split_season[0]), int(split_season[1]), 28, hour=8, tzinfo=utc).timestamp())
+        check_time  = int(pend.datetime(int(split_season[0]), int(split_season[1]), 28, hour=8, tzinfo=utc).timestamp())
 
     year = int(season[:4])
     month = int(season[-2:])
@@ -271,8 +280,8 @@ async def clan_games(request: Request, response: Response,
     if month == 12:
         next_month = 1
         year += 1
-    start = datetime(year, month, 1)
-    end = datetime(year, next_month, 1)
+    start = pend.datetime(year, month, 1)
+    end = pend.datetime(year, next_month, 1)
     new_data = []
     clan_to_name = {}
     by_clan = defaultdict(lambda : defaultdict(int))
@@ -285,11 +294,11 @@ async def clan_games(request: Request, response: Response,
             {"$sort": {"tag": 1, "time": 1}},
             {"$group": {"_id": "$tag", "first": {"$first": "$time"}, "last": {"$last": "$time"}}}
         ]
-        results: List[dict] = await db_client.player_history.aggregate(pipeline).to_list(length=None)
+        results: List[dict] = await mongo.player_history.aggregate(pipeline).to_list(length=None)
         member_stat_dict = {}
         for m in results:
             member_stat_dict[m["_id"]] = {"first": m["first"], "last": m["last"]}
-        stat_results = await db_client.player_stats_db.find({"tag" : {"$in" : [fix_tag(player) for player in players]}},
+        stat_results = await mongo.player_stats_db.find({"tag" : {"$in" : [fix_tag(player) for player in players]}},
                                                   {"tag" : 1, "name" : 1, "clan_games" : 1, "townhall" : 1, "clan_tag" : 1}).to_list(length=None)
         player_struct = {m.get("tag") : {"tag" : m.get("tag"), "name" : m.get("name"), "rank" : 0,
                                          "points" : m.get("clan_games", {}).get(season, {}).get("points", 0),
@@ -300,15 +309,15 @@ async def clan_games(request: Request, response: Response,
             if stats is not None:
                 if points < 4000:
                     stats["last"] = check_time
-                first_time = datetime.fromtimestamp(stats["first"])
-                last_time = datetime.fromtimestamp(stats["last"])
+                first_time = pend.from_timestamp(stats["first"])
+                last_time = pend.from_timestamp(stats["last"])
                 player_struct[tag]["time_taken"] = (last_time - first_time).seconds
         new_data = list(player_struct.values())
         for data in new_data:
             by_clan[data.get("clan_tag")]["points"] += data.get("points")
 
     elif clans:
-        clan_members = await db_client.basic_clan.find({"tag" : {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
+        clan_members = await mongo.basic_clan.find({"tag" : {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
         clan_to_name = {c.get("tag") : c.get("name") for c in clan_members}
         member_tags = []
         member_to_name = {}
@@ -326,13 +335,13 @@ async def clan_games(request: Request, response: Response,
             {"$sort": {"tag": 1, "time": 1}},
             {"$group": {"_id": "$tag", "first": {"$first": "$time"}, "last": {"$last": "$time"}}}
         ]
-        results: List[dict] = await db_client.player_history.aggregate(pipeline).to_list(length=None)
+        results: List[dict] = await mongo.player_history.aggregate(pipeline).to_list(length=None)
         member_stat_dict = {}
         for m in results:
             member_stat_dict[m["_id"]] = {"first": m["first"], "last": m["last"]}
-        stat_results = await db_client.clan_stats.find({"tag": {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
+        stat_results = await mongo.clan_stats.find({"tag": {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
         player_struct = {tag : {"tag" : tag, "name" : member_to_name.get(tag), "rank" : 0, "points" : 0, "time_taken" : 0, "townhall" : 0, "clan_tag": None} for tag in member_tags}
-        member_data = await db_client.player_stats_db.find({"tag" : {"$in" : member_tags}}, {"tag" : 1, "name" : 1, "clan_games" : 1, "townhall" : 1}).to_list(length=None)
+        member_data = await mongo.player_stats_db.find({"tag" : {"$in" : member_tags}}, {"tag" : 1, "name" : 1, "clan_games" : 1, "townhall" : 1}).to_list(length=None)
         for member in member_data:
             if not tied_only:
                 player_struct[member.get("tag")]["points"] = member.get("clan_games", {}).get(season, {}).get("points", 0)
@@ -359,8 +368,8 @@ async def clan_games(request: Request, response: Response,
             if stats is not None:
                 if points < 4000:
                     stats["last"] = check_time
-                first_time = datetime.fromtimestamp(stats["first"])
-                last_time = datetime.fromtimestamp(stats["last"])
+                first_time = pend.from_timestamp(stats["first"])
+                last_time = pend.from_timestamp(stats["last"])
                 player_struct[tag]["time_taken"] = (last_time - first_time).seconds
         new_data = list(player_struct.values())
 
@@ -388,7 +397,7 @@ async def clan_games(request: Request, response: Response,
 
     by_clan_totals = []
     if not clan_to_name:
-        clan_results = await db_client.basic_clan.find({"tag" : {"$in" : list(by_clan.keys())}}).to_list(length=None)
+        clan_results = await mongo.basic_clan.find({"tag" : {"$in" : list(by_clan.keys())}}).to_list(length=None)
         clan_to_name = {c.get("tag"): c.get("name") for c in clan_results}
     for k, v in by_clan.items():
         if clan_to_name.get(k) is None:
@@ -402,8 +411,8 @@ async def clan_games(request: Request, response: Response,
 @router.get("/war-stats",
          name="War Stats", include_in_schema=False)
 @cache(expire=300)
-async def war_stats(request: Request, response: Response,
-                           players: Annotated[List[str], Query(max_length=50)]=None,
+@linkd.ext.fastapi.inject
+async def war_stats(players: Annotated[List[str], Query(max_length=50)]=None,
                            clans: Annotated[List[str], Query(max_length=25)]=None,
                            server: int =None,
                            sort_field: str = "hit_rates.hitrate",
@@ -411,30 +420,32 @@ async def war_stats(request: Request, response: Response,
                            season_or_timestamp: str = None,
                            tied_only: bool = True,
                            descending: bool = True,
-                           limit: int = 50):
+                           limit: int = 50,
+                           *,
+                           mongo: MongoClient):
 
     limit = min(limit, 500)
     if server:
-        clans = await db_client.clans_db.distinct("tag", filter={"server" : server})
+        clans = await mongo.clans_db.distinct("tag", filter={"server" : server})
 
     if season_or_timestamp is None:
         season_or_timestamp = gen_season_date()
     if not season_or_timestamp.isnumeric():
         year = season_or_timestamp[:4]
         month = season_or_timestamp[-2:]
-        SEASON_START = coc.utils.get_season_start(month=(int(month) - 1 if int(month) != 1 else month == 12), year=int(year) if int(month) != 1 else int(year)-1).timestamp()
-        SEASON_END = coc.utils.get_season_end(month=(int(month) - 1 if int(month) != 1 else month == 12), year=int(year) if int(month) != 1 else int(year)-1).timestamp()
+        season_start = coc.utils.get_season_start(month=(int(month) - 1 if int(month) != 1 else month == 12), year=int(year) if int(month) != 1 else int(year)-1).timestamp()
+        season_end = coc.utils.get_season_end(month=(int(month) - 1 if int(month) != 1 else month == 12), year=int(year) if int(month) != 1 else int(year)-1).timestamp()
     else:
-        SEASON_START = int(season_or_timestamp)
-        SEASON_END = int(datetime.now().timestamp())
+        season_start = int(season_or_timestamp)
+        season_end = int(pend.now(tz=pend.UTC).timestamp())
 
-    SEASON_START = datetime.fromtimestamp(SEASON_START, tz=utc).strftime('%Y%m%dT%H%M%S.000Z')
-    SEASON_END = datetime.fromtimestamp(SEASON_END, tz=utc).strftime('%Y%m%dT%H%M%S.000Z')
+    season_start_str = pend.from_timestamp(season_start, tz=pend.UTC).strftime('%Y%m%dT%H%M%S.000Z')
+    season_end_str = pend.from_timestamp(season_end, tz=pend.UTC).strftime('%Y%m%dT%H%M%S.000Z')
 
     clan_to_name = {}
     by_clan = defaultdict(lambda : defaultdict(int))
     if not tied_only:
-        basic_clans = await db_client.basic_clan.find({"tag": {"$in" : clans}}).to_list(length=None)
+        basic_clans = await mongo.basic_clan.find({"tag": {"$in" : clans}}).to_list(length=None)
         players = []
         for b_c in basic_clans:
             players += [m.get("tag") for m in b_c.get("memberList", [])]
@@ -445,16 +456,16 @@ async def war_stats(request: Request, response: Response,
     if players:
         pipeline = [
             {"$match" : {"$and" : [{"$or" : [{"data.clan.members.tag" : {"$in" : players}}, {"data.opponent.members.tag" : {"$in" : players}}]},
-                        {"data.preparationStartTime" : {"$gte" : SEASON_START}}, {"data.preparationStartTime" : {"$lte" : SEASON_END}}]}},
+                        {"data.preparationStartTime" : {"$gte" : season_start_str}}, {"data.preparationStartTime" : {"$lte" : season_end_str}}]}},
             {"$unset": ["_id"]},
             {"$project": {"data" : "$data"}}
         ]
-        wars = await db_client.clan_wars.aggregate(pipeline, allowDiskUse=True, maxTimeMS=60000).to_list(length=None)
+        wars = await mongo.clan_wars.aggregate(pipeline, allowDiskUse=True, maxTimeMS=60000).to_list(length=None)
         found_wars = set()
         for war in wars:
             war = war.get("data")
             war = coc.ClanWar(data=war, client=coc_client)
-            war_unique_id = "-".join(sorted([war.clan_tag, war.opponent.tag])) + f"-{int(war.preparation_start_time.time.timestamp())}"
+            war_unique_id = generate_war_unique_id(war)
             if war_unique_id in found_wars:
                 continue
             found_wars.add(war_unique_id)
@@ -510,16 +521,16 @@ async def war_stats(request: Request, response: Response,
     elif clans:
         pipeline = [
             {"$match": {"$and": [{"$or": [{"clan": {"$in": clans}}, {"opponent": {"$in": clans}}]},
-                                 {"data.preparationStartTime": {"$gte": SEASON_START}}, {"data.preparationStartTime": {"$lte": SEASON_END}}]}},
+                                 {"data.preparationStartTime": {"$gte": season_start_str}}, {"data.preparationStartTime": {"$lte": season_end_str}}]}},
             {"$unset": ["_id"]},
             {"$project": {"data": "$data"}}
         ]
-        wars: List[dict] = await db_client.clan_wars.aggregate(pipeline, allowDiskUse=True, maxTimeMS=60000).to_list(length=None)
+        wars: List[dict] = await mongo.clan_wars.aggregate(pipeline, allowDiskUse=True, maxTimeMS=60000).to_list(length=None)
         found_wars = set()
         for war in wars:
             war = war.get("data")
             war = coc.ClanWar(data=war, client=coc_client)
-            war_unique_id = "-".join(sorted([war.clan_tag, war.opponent.tag])) + f"-{int(war.preparation_start_time.time.timestamp())}"
+            war_unique_id = generate_war_unique_id(war)
             if war_unique_id in found_wars:
                 continue
             found_wars.add(war_unique_id)
@@ -606,14 +617,14 @@ async def war_stats(request: Request, response: Response,
                     by_clan[result.get("clan")]["destruction"] += result.get("destruction")
                     by_clan[result.get("clan")][f"{num_to_word.get(result.get('stars'))}_stars"] += 1
 
-                for type in [("All","All"), ("townhall", hr_type), ("freshness", result.get("fresh")),
+                for stat_type in [("All","All"), ("townhall", hr_type), ("freshness", result.get("fresh")),
                              ("clan", result.get("clan")), ("war_type", result.get("war_type")), ("war_size", f"{result.get('war_size')}")]:
-                    if result_type == "defense" and type[0] == "clan":
+                    if result_type == "defense" and stat_type[0] == "clan":
                         continue
-                    rate[type]["total_attacks"] += 1
-                    rate[type]["total_stars"] += result.get("stars")
-                    rate[type]["total_destruction"] += result.get("destruction")
-                    rate[type][f"{num_to_word.get(result.get('stars'))}_stars"] += 1
+                    rate[stat_type]["total_attacks"] += 1
+                    rate[stat_type]["total_stars"] += result.get("stars")
+                    rate[stat_type]["total_destruction"] += result.get("destruction")
+                    rate[stat_type][f"{num_to_word.get(result.get('stars'))}_stars"] += 1
             return rate
 
         hit_rates = convert_result(this_player_attacks, "attack")
@@ -647,7 +658,7 @@ async def war_stats(request: Request, response: Response,
 
     try:
         totals["average_townhall"] = round(mean(totals.get("average_townhall", [0])), 2)
-    except:
+    except (ValueError, ZeroDivisionError, TypeError):
         totals["average_townhall"] = 0.00
     totals["hitrate"] = round((totals.get("three_stars", 0) / (totals.get("total_attacks") if totals.get("total_attacks") != 0 else 1)) * 100, 3)
 
@@ -660,7 +671,7 @@ async def war_stats(request: Request, response: Response,
         def sorter(elem):
             try:
                 return elem.get(split_field[0], [{}])[0].get(split_field[1], 0)
-            except Exception:
+            except (IndexError, KeyError, TypeError):
                 return 0
         new_data = sorted(player_stats, key=sorter, reverse=descending)[:limit]
     else:
@@ -684,31 +695,33 @@ async def war_stats(request: Request, response: Response,
 @router.get("/capital",
          name="Capital Stats", include_in_schema=False)
 @cache(expire=300)
-async def capital_stats(request: Request, response: Response,
-                           players: Annotated[List[str], Query(max_length=50)]=None,
+@linkd.ext.fastapi.inject
+async def capital_stats(players: Annotated[List[str], Query(max_length=50)]=None,
                            clans: Annotated[List[str], Query(max_length=25)]=None,
                            server: int =None,
                            sort_field: str = "raided",
                            weekend_or_timestamp: str = None,
                            tied_only: bool = True,
                            descending: bool = True,
-                           limit: int = 50):
+                           limit: int = 50,
+                           *,
+                           mongo: MongoClient):
 
     limit = min(limit, 500)
     if server:
-        clans = await db_client.clans_db.distinct("tag", filter={"server" : server})
+        clans = await mongo.clans_db.distinct("tag", filter={"server" : server})
 
     if weekend_or_timestamp is None:
         weekend_or_timestamp = gen_raid_date()
 
     if not weekend_or_timestamp.isnumeric():
         split_date = weekend_or_timestamp.split("-")
-        WEEKEND_START = int(datetime(year=int(split_date[0]), month=int(split_date[1]), day=int(split_date[2]), tzinfo=utc).timestamp())
-        print(WEEKEND_START)
-        WEEKEND_END = WEEKEND_START + (86400 * 4)
+        weekend_start = int(pend.datetime(year=int(split_date[0]), month=int(split_date[1]), day=int(split_date[2]), tzinfo=utc).timestamp())
+        print(weekend_start)
+        weekend_end = weekend_start + (86400 * 4)
     else:
-        WEEKEND_START = int(weekend_or_timestamp)
-        WEEKEND_END = int(datetime.now().timestamp())
+        weekend_start = int(weekend_or_timestamp)
+        weekend_end = int(pend.now(tz=pend.UTC).timestamp())
 
     def find_fridays_between(start, end):
         total_days: int = (end - start).days + 1
@@ -716,19 +729,19 @@ async def capital_stats(request: Request, response: Response,
         all_days = [start + timedelta(days=day) for day in range(total_days)]
         return [day for day in all_days if day.weekday() is friday]
 
-    WEEKEND_START = datetime.fromtimestamp(WEEKEND_START, tz=utc)
-    WEEKEND_END = datetime.fromtimestamp(WEEKEND_END, tz=utc)
-    capital_dates = find_fridays_between(WEEKEND_START, WEEKEND_END)
-    WEEKEND_START = WEEKEND_START.strftime('%Y%m%dT%H%M%S.000Z')
-    WEEKEND_END = WEEKEND_END.strftime('%Y%m%dT%H%M%S.000Z')
+    weekend_start_dt = pend.from_timestamp(weekend_start, tz=pend.UTC)
+    weekend_end_dt = pend.from_timestamp(weekend_end, tz=pend.UTC)
+    capital_dates = find_fridays_between(weekend_start_dt, weekend_end_dt)
+    weekend_start_str = weekend_start_dt.strftime('%Y%m%dT%H%M%S.000Z')
+    weekend_end_str = weekend_end_dt.strftime('%Y%m%dT%H%M%S.000Z')
 
-    print(WEEKEND_START)
-    print(WEEKEND_END)
+    print(weekend_start_str)
+    print(weekend_end_str)
     clan_to_name = {}
     by_clan = defaultdict(lambda : defaultdict(int))
 
     if not players:
-        basic_clans = await db_client.basic_clan.find({"tag": {"$in" : clans}}).to_list(length=None)
+        basic_clans = await mongo.basic_clan.find({"tag": {"$in" : clans}}).to_list(length=None)
         players = []
         for b_c in basic_clans:
             clan_to_name[b_c.get("tag")] = b_c.get("name")
@@ -738,12 +751,12 @@ async def capital_stats(request: Request, response: Response,
     stats = defaultdict(lambda : defaultdict(int))
     if players:
         pipeline = [
-            {"$match" : {"$and" : [{"data.members.tag" : {"$in" : players}}, {"data.startTime" : {"$gte" : WEEKEND_START}}, {"data.endTime" : {"$lte" : WEEKEND_END}}]}},
+            {"$match" : {"$and" : [{"data.members.tag" : {"$in" : players}}, {"data.startTime" : {"$gte" : weekend_start_str}}, {"data.endTime" : {"$lte" : weekend_end_str}}]}},
             {"$unset": ["_id"]}
         ]
-        raids = await db_client.capital.aggregate(pipeline, allowDiskUse=True).to_list(length=None)
+        raids = await mongo.capital.aggregate(pipeline, allowDiskUse=True).to_list(length=None)
 
-        player_stats = await db_client.player_stats_db.find({"tag" : {"$in" : players}}, {"tag" : 1, "capital_gold" : 1}).to_list(length=None)
+        player_stats = await mongo.player_stats_db.find({"tag" : {"$in" : players}}, {"tag" : 1, "capital_gold" : 1}).to_list(length=None)
         donated_capital = {}
         for p in player_stats:
             for date in capital_dates:
@@ -768,10 +781,10 @@ async def capital_stats(request: Request, response: Response,
 
     elif clans:
         pipeline = [
-            {"$match": {"$and": [{"clan_tag": {"$in": clans}}, {"data.startTime": {"$gte": WEEKEND_START}}, {"data.endTime": {"$lte": WEEKEND_END}}]}},
+            {"$match": {"$and": [{"clan_tag": {"$in": clans}}, {"data.startTime": {"$gte": weekend_start_str}}, {"data.endTime": {"$lte": weekend_end_str}}]}},
             {"$unset": ["_id"]}
         ]
-        raids = await db_client.capital.aggregate(pipeline, allowDiskUse=True).to_list(length=None)
+        raids = await mongo.capital.aggregate(pipeline, allowDiskUse=True).to_list(length=None)
 
         player_tags = set()
         for raid in raids:
@@ -780,7 +793,7 @@ async def capital_stats(request: Request, response: Response,
             for raid_member in raid.members:
                 player_tags.add(raid_member.tag)
 
-        player_stats = await db_client.player_stats_db.find({"tag": {"$in": list(player_tags)}}, {"tag": 1, "capital_gold": 1}).to_list(length=None)
+        player_stats = await mongo.player_stats_db.find({"tag": {"$in": list(player_tags)}}, {"tag": 1, "capital_gold": 1}).to_list(length=None)
         donated_capital = {}
         for p in player_stats:
             for date in capital_dates:
@@ -818,7 +831,7 @@ async def capital_stats(request: Request, response: Response,
         data["rank"] = count
 
     if not clan_to_name:
-        basic_clans = await db_client.basic_clan.find({"tag": {"$in" : list(by_clan.keys())}}).to_list(length=None)
+        basic_clans = await mongo.basic_clan.find({"tag": {"$in" : list(by_clan.keys())}}).to_list(length=None)
         for b_c in basic_clans:
             clan_to_name[b_c.get("tag")] = b_c.get("name")
 

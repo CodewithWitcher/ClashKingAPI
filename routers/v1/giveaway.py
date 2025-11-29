@@ -2,6 +2,7 @@ import json
 import uuid
 from typing import List
 import pendulum as pend
+import linkd
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -9,7 +10,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from routers.v1.tickets import get_channels, get_roles
-from utils.utils import db_client, validate_token, delete_from_cdn
+from utils.utils import validate_token, delete_from_cdn
+from utils.database import MongoClient
 
 router = APIRouter(prefix="/giveaway", include_in_schema=False)
 templates = Jinja2Templates(directory="templates")
@@ -25,13 +27,14 @@ class BoosterModel(BaseModel):
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
-async def giveaway_dashboard(request: Request, token: str, message: str = None):
+@linkd.ext.fastapi.inject
+async def giveaway_dashboard(request: Request, token: str, *, mongo: MongoClient, message: str = None):
     """
     Dashboard to view, create, and manage giveaways.
     """
     # Validate the token
     try:
-        token_data = await validate_token(token, expected_type="giveaway")
+        token_data = await validate_token(token, mongo, expected_type="giveaway")
     except ValueError as e:
         raise HTTPException(status_code=403, detail=str(e))
 
@@ -40,7 +43,7 @@ async def giveaway_dashboard(request: Request, token: str, message: str = None):
     print(channels)
 
     # Fetch all giveaways for the server
-    giveaways = await db_client.giveaways.find({"server_id": server_id}).to_list(length=None)
+    giveaways = await mongo.giveaways.find({"server_id": server_id}).to_list(length=None)
 
     # Sort giveaways by status and time
     ongoing = sorted([g for g in giveaways if g["status"] == "ongoing"], key=lambda g: g["start_time"], reverse=True)
@@ -60,6 +63,7 @@ async def giveaway_dashboard(request: Request, token: str, message: str = None):
 
 
 @router.post("/submit")
+@linkd.ext.fastapi.inject
 async def submit_giveaway_form(
         server_id: str = Form(...),
         token: str = Form(...),
@@ -80,7 +84,9 @@ async def submit_giveaway_form(
         roles_mode: str = Form("allow"),
         roles_json: str = Form(...),
         boosters_json: str = Form(...),
-        remove_image: bool = Form(False)
+        remove_image: bool = Form(False),
+        *,
+        mongo: MongoClient
 ):
     """
     Handle form submissions to create or update a giveaway.
@@ -122,7 +128,7 @@ async def submit_giveaway_form(
     image_url = None
     if remove_image:
         # Retrieve the current image URL from the database
-        existing_giveaway = await db_client.giveaways.find_one({"_id": giveaway_id, "server_id": server_id})
+        existing_giveaway = await mongo.giveaways.find_one({"_id": giveaway_id, "server_id": server_id})
         if existing_giveaway and "image_url" in existing_giveaway:
             await delete_from_cdn(existing_giveaway["image_url"])
     elif image and image.filename:
@@ -133,7 +139,7 @@ async def submit_giveaway_form(
 
     # Fetch existing giveaway to preserve its image if not removed
     if not remove_image and not image_url:
-        existing_giveaway = await db_client.giveaways.find_one({"_id": giveaway_id, "server_id": server_id})
+        existing_giveaway = await mongo.giveaways.find_one({"_id": giveaway_id, "server_id": server_id})
         if existing_giveaway:
             image_url = existing_giveaway.get("image_url")
 
@@ -157,11 +163,11 @@ async def submit_giveaway_form(
         "boosters": parsed_boosters
     }
 
-    if await db_client.giveaways.find_one({"_id": giveaway_id, "server_id": server_id}):
+    if await mongo.giveaways.find_one({"_id": giveaway_id, "server_id": server_id}):
         # Add modification timestamp
         giveaway_data["updated"] = "yes"
         # Update existing giveaway
-        await db_client.giveaways.update_one(
+        await mongo.giveaways.update_one(
             {"_id": giveaway_id, "server_id": server_id},
             {"$set": giveaway_data}
         )
@@ -171,7 +177,7 @@ async def submit_giveaway_form(
         # Create a new giveaway
         giveaway_data["server_id"] = server_id
         giveaway_data["status"] = "scheduled"
-        await db_client.giveaways.insert_one(giveaway_data)
+        await mongo.giveaways.insert_one(giveaway_data)
         if now:
             status_message = "Giveaway created successfully. It will be sent shortly."
         else:
@@ -183,9 +189,10 @@ async def submit_giveaway_form(
 
 
 @router.get("/create", response_class=HTMLResponse)
-async def create_page(request: Request, token: str):
+@linkd.ext.fastapi.inject
+async def create_page(request: Request, token: str, *, mongo: MongoClient):
     # Verify the token
-    token_data = await db_client.tokens.find_one({"token": token, "type": "giveaway"})
+    token_data = await mongo.tokens.find_one({"token": token, "type": "giveaway"})
     if not token_data:
         return JSONResponse({"detail": "Invalid token."}, status_code=403)
 
@@ -204,12 +211,13 @@ async def create_page(request: Request, token: str):
 
 
 @router.get("/edit/{giveaway_id}", response_class=HTMLResponse)
-async def edit_page(request: Request, token: str, giveaway_id: str):
-    token_data = await db_client.tokens.find_one({"token": token, "type": "giveaway"})
+@linkd.ext.fastapi.inject
+async def edit_page(request: Request, token: str, giveaway_id: str, *, mongo: MongoClient):
+    token_data = await mongo.tokens.find_one({"token": token, "type": "giveaway"})
     if not token_data:
         raise HTTPException(status_code=403, detail="Invalid token.")
 
-    giveaway = await db_client.giveaways.find_one({"_id": giveaway_id})
+    giveaway = await mongo.giveaways.find_one({"_id": giveaway_id})
     if not giveaway:
         raise HTTPException(status_code=404, detail="Giveaway not found.")
 
@@ -229,7 +237,8 @@ async def edit_page(request: Request, token: str, giveaway_id: str):
 
 
 @router.delete("/delete/{giveaway_id}")
-async def delete_giveaway(giveaway_id: str, token: str, server_id: str):
+@linkd.ext.fastapi.inject
+async def delete_giveaway(giveaway_id: str, token: str, server_id: str, *, mongo: MongoClient):
     """
     Delete a giveaway from the database.
     """
@@ -237,12 +246,12 @@ async def delete_giveaway(giveaway_id: str, token: str, server_id: str):
     # Convert to the correct types
     server_id = int(server_id)
     # Verify the token
-    token_data = await db_client.tokens.find_one({"token": token, "server_id": server_id})
+    token_data = await mongo.tokens.find_one({"token": token, "server_id": server_id})
     if not token_data:
         return JSONResponse({"message": "Invalid token."}, status_code=403)
 
     # Delete the giveaway
-    result = await db_client.giveaways.delete_one({"_id": giveaway_id, "server_id": int(server_id)})
+    result = await mongo.giveaways.delete_one({"_id": giveaway_id, "server_id": int(server_id)})
     if result.deleted_count == 1:
         status_message = "Giveaway deleted successfully."
     else:

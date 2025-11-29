@@ -1,6 +1,6 @@
 import pymongo
 
-from .config import Config
+from utils.config import Config
 
 config = Config()
 

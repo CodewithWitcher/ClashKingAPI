@@ -1,10 +1,29 @@
 import aiohttp
 import asyncio
 import orjson
-from asyncio_throttle import Throttler
+import os
+from dotenv import load_dotenv
+
+# Try to import asyncio_throttle, provide fallback if not available
+try:
+    from asyncio_throttle import Throttler
+except ImportError:
+    # Fallback: simple semaphore-based throttler
+    class Throttler:
+        def __init__(self, rate_limit):
+            self.semaphore = asyncio.Semaphore(rate_limit)
+
+        async def __aenter__(self):
+            await self.semaphore.acquire()
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            self.semaphore.release()
+
+load_dotenv()
 
 url = "https://api.clashroyale.com/v1/globaltournaments"
-token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiIsImtpZCI6IjI4YTMxOGY3LTAwMDAtYTFlYi03ZmExLTJjNzQzM2M2Y2NhNSJ9.eyJpc3MiOiJzdXBlcmNlbGwiLCJhdWQiOiJzdXBlcmNlbGw6Z2FtZWFwaSIsImp0aSI6IjNiZDZhMzdiLTUwMDQtNGRkYS1hNTY2LTc0ZDJhNjE5NzljNSIsImlhdCI6MTc1NjM5NTc4Niwic3ViIjoiZGV2ZWxvcGVyL2Q5YzVlOGQ1LTNhNWYtMGY4MS1jNDA5LTI3Yjg1ODQwNDc3OSIsInNjb3BlcyI6WyJyb3lhbGUiXSwibGltaXRzIjpbeyJ0aWVyIjoicGFydG5lci9wbGF0aW51bSIsInR5cGUiOiJ0aHJvdHRsaW5nIn0seyJjaWRycyI6WyI0Ny4xODQuMjE2LjYxIl0sInR5cGUiOiJjbGllbnQifV19.t1qmSqzYLnclyOjdYZrvtW6RErK1DlGUPzb7y6U3it3Us8gTLgn5Hb1b16hZpG5wxRoHhvD3JvRWhplIkvKr5g"
+# Load token from environment variable instead of hardcoding
+token = os.getenv("CLASH_ROYALE_API_TOKEN", "")
 total_429s = 0
 throttler = Throttler(2000)
 

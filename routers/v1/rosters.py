@@ -9,7 +9,9 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from starlette.requests import Request
-from utils.utils import db_client, upload_to_cdn
+from utils.utils import upload_to_cdn
+from utils.database import MongoClient
+import linkd
 
 router = APIRouter(prefix="/roster", include_in_schema=False)
 
@@ -17,20 +19,21 @@ templates = Jinja2Templates(directory="templates")
 
 
 @router.get("/", response_class=HTMLResponse)
-async def get_form(request: Request, token: str):
-    roster = await db_client.rosters.find_one({"token" : token})
+@linkd.ext.fastapi.inject
+async def get_form(request: Request, token: str, *, mongo: MongoClient):
+    roster = await mongo.rosters.find_one({"token" : token})
     server = roster.get("server_id")
-    clans = await db_client.clans_db.find({"server" : server}, {"name" : 1, "tag" : 1}).to_list(length=None)
+    clans = await mongo.clans_db.find({"server" : server}, {"name" : 1, "tag" : 1}).to_list(length=None)
     clans = [f"{c.get('name')} ({c.get('tag')})" for c in clans]
     linked_clan = f"{roster.get('clan_name')} ({roster.get('clan_tag')})"
-    server = await db_client.server_db.find_one({'server': server}, {'player_groups' : 1})
+    server = await mongo.server_db.find_one({'server': server}, {'player_groups' : 1})
     buttons = list(set(server.get('player_groups', [])))
-    min, max = roster.get('th_restriction').split('-')
-    if max == "max":
-        max = 17
+    th_min, th_max = roster.get('th_restriction').split('-')
+    if th_max == "max":
+        th_max = 17
     initial_values = {
-        "townhall_min": int(min),
-        "townhall_max": int(max),
+        "townhall_min": int(th_min),
+        "townhall_max": int(th_max),
         "max_roster_size": roster.get('roster_size', 50),
         "description": roster.get('description', ''),
         "time": roster.get('time'),
@@ -104,14 +107,18 @@ async def get_index(request: Request):
 
 @router.get("/search")
 async def search_players(query: str):
-    # Implement your search logic here
-    results = []  # Replace with actual search results
-    return {"results": results}
+    # TODO: Implement search logic
+    # For now, return empty results with the query parameter
+    results = []  # Replace with actual search results based on query
+    return {"results": results, "query": query}
 
 @router.post("/submit")
+@linkd.ext.fastapi.inject
 async def submit_form(
         settings: str = Form(...),  # JSON string
-        image: UploadFile = File(None)  # Optional image
+        image: UploadFile = File(None),  # Optional image
+        *,
+        mongo: MongoClient
 ):
     # Parse the JSON string to a dictionary
     settings_dict = json.loads(settings)
@@ -139,8 +146,8 @@ async def submit_form(
             if response.status == 200:
                 clan_data = await response.json()
 
-    previous_roster = await db_client.rosters.find_one({"token" : settings_dict.get('token')})
-    await db_client.rosters.update_one({"token" : settings_dict.get('token')},
+    previous_roster = await mongo.rosters.find_one({"token" : settings_dict.get('token')})
+    await mongo.rosters.update_one({"token" : settings_dict.get('token')},
         {"$set" : {
         'alias' : settings_dict.get('name')[:100],
         'image' : image_url or previous_roster.get('image'),

@@ -1,11 +1,14 @@
 import aiohttp
 import orjson
 import asyncio
+import linkd
 
 from fastapi import  Request, Response, HTTPException, Header
 from fastapi import APIRouter
 from typing import List
-from utils.utils import fix_tag, db_client, config
+from utils.utils import fix_tag
+from utils.database import MongoClient
+from utils.config import Config
 from expiring_dict import ExpiringDict
 
 
@@ -26,7 +29,7 @@ async def fetch_image(url: str) -> bytes:
 @router.get("/v1/{url:path}",
          name="Test a coc api endpoint, very high ratelimit, only for testing without auth",
          include_in_schema=False)
-async def test_endpoint(url: str, request: Request, response: Response):
+async def test_endpoint(url: str):
 
     full_url = f"https://proxy.clashk.ing/v1/{url}"
     full_url = full_url.replace("#", '%23').replace("!", '%23')
@@ -44,7 +47,7 @@ async def test_endpoint(url: str, request: Request, response: Response):
 @router.post("/v1/{url:path}",
              name="Test a coc api endpoint, very high ratelimit, only for testing without auth",
              include_in_schema=False)
-async def test_post_endpoint(url: str, request: Request, response: Response):
+async def test_post_endpoint(url: str, request: Request):
 
     # Construct the full URL with query parameters if any
     full_url = f"https://proxy.clashk.ing/v1/{url}"
@@ -65,16 +68,17 @@ async def test_post_endpoint(url: str, request: Request, response: Response):
     return item
 
 @router.get("/bot/config", include_in_schema=False)
-async def bot_config(bot_token: str = Header(...)):
-    bot_config = await db_client.bot_settings.find_one({"type" : "bot"}, {"_id" : 0})
+@linkd.ext.fastapi.inject
+async def bot_config(bot_token: str = Header(...), *, mongo: MongoClient):
+    config_data = await mongo.bot_settings.find_one({"type" : "bot"}, {"_id" : 0})
 
     is_main = False
     is_beta = False
     is_custom = False
 
-    if bot_token == bot_config.get("prod_token"):
+    if bot_token == config_data.get("prod_token"):
         is_main = True
-    elif bot_token in bot_config.get("beta_tokens", []):
+    elif bot_token in config_data.get("beta_tokens", []):
         is_beta = True
     else:
         raise HTTPException(status_code=401, detail="Invalid or missing token")
@@ -85,28 +89,29 @@ async def bot_config(bot_token: str = Header(...)):
         "is_custom": is_custom
     }
 
-    return bot_config | extra_config
+    return config_data | extra_config
 
 
 #fix one day + connect to db
 @router.get("/permalink/{clan_tag}",
          name="Permanent Link to Clan Badge URL", include_in_schema=False)
-async def permalink(clan_tag: str):
+@linkd.ext.fastapi.inject
+async def permalink(clan_tag: str, *, mongo: MongoClient):
 
     clan_tag = fix_tag(clan_tag)
-    db_clan_result = await db_client.global_clans.find_one({"_id" : clan_tag}, {"data."})
+    db_clan_result = await mongo.global_clans.find_one({"_id" : clan_tag}, {"data."})
     if not db_clan_result:
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                    f"https://api.clashofclans.com/v1/clans/{clan_tag.replace('#', '%23')}") as response:
-                items = await response.json()
+        async with aiohttp.ClientSession() as http_session:
+            async with http_session.get(
+                    f"https://api.clashofclans.com/v1/clans/{clan_tag.replace('#', '%23')}") as resp:
+                items = await resp.json()
         image_link = items["badgeUrls"]["large"]
     else:
         image_link = None
 
-    async def fetch(url, session):
-        async with session.get(url) as response:
+    async def fetch(badge_url, client_session):
+        async with client_session.get(badge_url) as response:
             image_data = await response.read()
             return image_data
 
@@ -122,16 +127,17 @@ async def permalink(clan_tag: str):
 @router.post("/ck/bulk",
          name="Only for internal use, rotates tokens and implements caching so that all other services dont need to",
          include_in_schema=False)
-async def ck_bulk_proxy(urls: List[str], request: Request, response: Response):
-    
+@linkd.ext.fastapi.inject
+async def ck_bulk_proxy(urls: List[str], request: Request, *, config: Config):
+
     token = request.headers.get("authorization")
     if token != f"Bearer {config.internal_api_token}":
         raise HTTPException(status_code=401, detail="Invalid token")
 
-    async def fetch_function(url: str):
-        url = url.replace("#", '%23')
+    async def fetch_function(api_endpoint: str):
+        encoded_url = api_endpoint.replace("#", '%23')
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://proxy.clashk.ing/v1/{url}") as response:
+            async with session.get(f"https://proxy.clashk.ing/v1/{encoded_url}") as response:
                 item_bytes = await response.read()
                 item = orjson.loads(item_bytes)
                 if response.status != 200:

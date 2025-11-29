@@ -51,21 +51,25 @@ def initialize_member_stats(members):
         }
     return member_stats
 
+def update_member_stats(attack, attacker_stats, defender_stats):
+    """Update member stats for an attack."""
+    if attack["attackerTag"] in attacker_stats:
+        attacker_stats[attack["attackerTag"]]["attacks_used"] += 1
+    if attack["defenderTag"] in defender_stats:
+        defender_stats[attack["defenderTag"]]["defenses_used"] += 1
+
 def compute_timeline(war_data):
     clan = war_data["clan"]
     opponent = war_data["opponent"]
-    attacks_per_member = war_data.get("attacksPerMember", 1)
     team_size = war_data["teamSize"]
 
     all_attacks = extract_attacks(war_data)
 
     # Initialize cumulative stats
     clan_stars = 0
-    clan_destruction = 0.0
     clan_attacks_used = 0
 
     opponent_stars = 0
-    opponent_destruction = 0.0
     opponent_attacks_used = 0
 
     clan_members_stats = initialize_member_stats(clan["members"])
@@ -92,21 +96,13 @@ def compute_timeline(war_data):
             clan_stars += attack["stars"]
             sum_clan_destruction += attack["destructionPercentage"]
             clan_attacks_used += 1
-
-            if attack["attackerTag"] in clan_members_stats:
-                clan_members_stats[attack["attackerTag"]]["attacks_used"] += 1
-            if attack["defenderTag"] in opponent_members_stats:
-                opponent_members_stats[attack["defenderTag"]]["defenses_used"] += 1
+            update_member_stats(attack, clan_members_stats, opponent_members_stats)
 
         else:
             opponent_stars += attack["stars"]
             sum_opponent_destruction += attack["destructionPercentage"]
             opponent_attacks_used += 1
-
-            if attack["attackerTag"] in opponent_members_stats:
-                opponent_members_stats[attack["attackerTag"]]["attacks_used"] += 1
-            if attack["defenderTag"] in clan_members_stats:
-                clan_members_stats[attack["defenderTag"]]["defenses_used"] += 1
+            update_member_stats(attack, opponent_members_stats, clan_members_stats)
 
         clan_destruction = (sum_clan_destruction / (team_size * 100)) * 100
         opponent_destruction = (sum_opponent_destruction / (team_size * 100)) * 100

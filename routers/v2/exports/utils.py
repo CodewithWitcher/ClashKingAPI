@@ -378,12 +378,12 @@ def _add_map_position_filters(filters: List[str], filter_obj) -> None:
 
 def _add_date_range_filter(filters: List[str], filter_obj) -> None:
     """Add date range filter to filters list if applicable."""
-    from datetime import datetime
+    import pendulum as pend
 
     if filter_obj.timestamp_start != 0 or filter_obj.timestamp_end != 2527625513:
-        start_date = datetime.fromtimestamp(filter_obj.timestamp_start).strftime(
+        start_date = pend.from_timestamp(filter_obj.timestamp_start, tz=pend.UTC).strftime(
             '%Y-%m-%d') if filter_obj.timestamp_start > 0 else "Beginning"
-        end_date = datetime.fromtimestamp(filter_obj.timestamp_end).strftime(
+        end_date = pend.from_timestamp(filter_obj.timestamp_end, tz=pend.UTC).strftime(
             '%Y-%m-%d') if filter_obj.timestamp_end < 2527625513 else "Present"
         filters.append(f"Date range: {start_date} to {end_date}")
 
@@ -419,12 +419,12 @@ def build_filter_summary(filter_obj) -> str:
 
 def _parse_war_date(preparation_start_time: str) -> str:
     """Parse war preparation start time to formatted date string."""
-    from datetime import datetime
+    import pendulum as pend
 
     if not preparation_start_time:
         return ""
     try:
-        return datetime.strptime(preparation_start_time, '%Y%m%dT%H%M%S.%fZ').strftime('%Y-%m-%d %H:%M')
+        return pend.parse(preparation_start_time).strftime('%Y-%m-%d %H:%M')
     except (ValueError, AttributeError):
         return ""
 

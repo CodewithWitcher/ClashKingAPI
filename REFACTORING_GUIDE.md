@@ -671,8 +671,7 @@ async def forgot_password(req: ForgotPasswordRequest, *, mongo: MongoClient):
 
 ```python
 @router.get("/me", response_model=UserInfo, name="Get current user info")
-@check_authentication
-@linkd.ext.fastapi.inject
+@linkd.ext.fastapi.inject @check_authentication
 async def get_current_user_info(
     _user_id: str = None,  # Injecté par @check_authentication
     _credentials: HTTPAuthorizationCredentials = Depends(security),
