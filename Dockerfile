@@ -7,11 +7,11 @@ LABEL org.opencontainers.image.licenses=MIT
 # Install uv and system dependencies
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libsnappy-dev \
-    git \
-    curl \
     build-essential \
+    curl \
     gcc \
+    git \
+    libsnappy-dev \
     python3-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 

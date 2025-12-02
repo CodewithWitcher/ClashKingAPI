@@ -2,6 +2,9 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Literal, Dict, Any
 
 
+# Constants
+DISCORD_ROLE_ID_DESC = "Discord role ID"
+
 # Enum for role types
 RoleType = Literal[
     "townhall",
@@ -16,31 +19,31 @@ RoleType = Literal[
 
 class TownhallRoleCreate(BaseModel):
     """Create a townhall role"""
-    role: int = Field(..., description="Discord role ID")
+    role: int = Field(..., description=DISCORD_ROLE_ID_DESC)
     th: int = Field(..., description="Townhall level", ge=1, le=17)
 
 
 class LeagueRoleCreate(BaseModel):
     """Create a league role"""
-    role: int = Field(..., description="Discord role ID")
+    role: int = Field(..., description=DISCORD_ROLE_ID_DESC)
     type: str = Field(..., description="League type (e.g., 'Legend League', 'Titan League I')")
 
 
 class BuilderHallRoleCreate(BaseModel):
     """Create a builder hall role"""
-    role: int = Field(..., description="Discord role ID")
+    role: int = Field(..., description=DISCORD_ROLE_ID_DESC)
     bh: int = Field(..., description="Builder hall level", ge=1, le=10)
 
 
 class BuilderLeagueRoleCreate(BaseModel):
     """Create a builder league role"""
-    role: int = Field(..., description="Discord role ID")
+    role: int = Field(..., description=DISCORD_ROLE_ID_DESC)
     type: str = Field(..., description="Builder league type")
 
 
 class AchievementRoleCreate(BaseModel):
     """Create an achievement role"""
-    id: int = Field(..., description="Discord role ID")
+    id: int = Field(..., description=DISCORD_ROLE_ID_DESC)
     type: str = Field(..., description="Achievement type")
     season: str = Field(..., description="Season (e.g., '2024-01')")
     amount: int = Field(..., description="Amount required")
@@ -48,13 +51,13 @@ class AchievementRoleCreate(BaseModel):
 
 class StatusRoleCreate(BaseModel):
     """Create a status role (Discord tenure)"""
-    id: int = Field(..., description="Discord role ID")
+    id: int = Field(..., description=DISCORD_ROLE_ID_DESC)
     months: int = Field(..., description="Months in server required")
 
 
 class FamilyPositionRoleCreate(BaseModel):
     """Create a family position role"""
-    role: int = Field(..., description="Discord role ID")
+    role: int = Field(..., description=DISCORD_ROLE_ID_DESC)
     type: Literal["family_elder_roles", "family_co-leader_roles", "family_leader_roles"] = Field(
         ..., description="Position type"
     )

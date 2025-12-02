@@ -11,7 +11,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from utils.utils import remove_id_fields
 from utils.database import MongoClient
-from utils.time import is_cwl
+from utils.time_utils import is_cwl
 
 from routers.v2.war.utils import (
     calculate_war_stats,
@@ -512,11 +512,11 @@ async def players_warhits_stats(war_filter: PlayerWarhitsFilter, *, mongo: Mongo
         cursor = await mongo.clan_wars.aggregate(pipeline, allowDiskUse=True)
         wars_docs = await cursor.to_list(length=None)
 
-        result = await collect_player_hits_from_wars(
+        result = collect_player_hits_from_wars(
             wars_docs,
             tags_to_include=[player_tag],
             clan_tags=None,
-            filter=war_filter,
+            hits_filter=war_filter,
             client=client
         )
         return result["items"]
@@ -551,11 +551,11 @@ async def clan_warhits_stats(war_filter: ClanWarHitsFilter, *, mongo: MongoClien
         cursor = await mongo.clan_wars.aggregate(pipeline, allowDiskUse=True)
         wars_docs = await cursor.to_list(length=None)
 
-        results = await collect_player_hits_from_wars(
+        results = collect_player_hits_from_wars(
             wars_docs,
             tags_to_include=None,
             clan_tags=[clan_tag],
-            filter=war_filter,
+            hits_filter=war_filter,
             client=client,
         )
 

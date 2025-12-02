@@ -15,6 +15,13 @@ SERVER_NOT_FOUND = "Server not found"
 NO_CLANS_FOUND = "No clans found for this server"
 INVALID_SEASON_FORMAT = "Invalid season format. Use YYYY-MM"
 
+# MongoDB aggregation operator constants
+MATCH_OP = "$match"
+GROUP_OP = "$group"
+COND_OP = "$cond"
+DIVIDE_OP = "$divide"
+TOTAL_RAIDS_FIELD = "$total_raids"
+
 
 async def verify_server_exists(guild_id: int, mongo: MongoClient) -> Dict[str, Any]:
     """Verify that a server exists.
@@ -135,10 +142,10 @@ def build_player_stats_pipeline(
         MongoDB aggregation pipeline
     """
     return [
-        {"$match": match_query},
+        {MATCH_OP: match_query},
         {"$unwind": "$data.members"},
         {
-            "$group": {
+            GROUP_OP: {
                 "_id": "$data.members.tag",
                 "player_name": {"$first": "$data.members.name"},
                 "clans": {"$addToSet": "$data.clan.tag"},
@@ -174,12 +181,30 @@ def build_count_pipeline(match_query: Dict[str, Any]) -> List[Dict[str, Any]]:
         MongoDB aggregation pipeline
     """
     return [
-        {"$match": match_query},
+        {MATCH_OP: match_query},
         {"$unwind": "$data.members"},
-        {"$group": {"_id": "$data.members.tag"}},
+        {GROUP_OP: {"_id": "$data.members.tag"}},
         {"$count": "total"}
     ]
 
+
+def _safe_divide_expression(numerator: str, denominator: str) -> Dict[str, Any]:
+    """Create a MongoDB conditional division expression that handles division by zero.
+
+    Args:
+        numerator: Field name for numerator (e.g., "$total_capital_gold_looted")
+        denominator: Field name for denominator (e.g., "$total_raids")
+
+    Returns:
+        MongoDB conditional expression that returns 0 if denominator is 0, otherwise divides
+    """
+    return {
+        COND_OP: [
+            {"$eq": [denominator, 0]},
+            0,
+            {DIVIDE_OP: [numerator, denominator]}
+        ]
+    }
 
 def build_clan_leaderboard_pipeline(match_query: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Build aggregation pipeline for clan leaderboard.
@@ -191,9 +216,9 @@ def build_clan_leaderboard_pipeline(match_query: Dict[str, Any]) -> List[Dict[st
         MongoDB aggregation pipeline
     """
     return [
-        {"$match": match_query},
+        {MATCH_OP: match_query},
         {
-            "$group": {
+            GROUP_OP: {
                 "_id": "$data.clan.tag",
                 "total_raids": {"$sum": 1},
                 "total_capital_gold_looted": {"$sum": "$data.capitalTotalLoot"},
@@ -210,27 +235,9 @@ def build_clan_leaderboard_pipeline(match_query: Dict[str, Any]) -> List[Dict[st
                 "total_capital_gold_looted": 1,
                 "total_raid_medals": 1,
                 "total_attacks": 1,
-                "average_capital_gold_per_raid": {
-                    "$cond": [
-                        {"$eq": ["$total_raids", 0]},
-                        0,
-                        {"$divide": ["$total_capital_gold_looted", "$total_raids"]}
-                    ]
-                },
-                "average_raid_medals_per_raid": {
-                    "$cond": [
-                        {"$eq": ["$total_raids", 0]},
-                        0,
-                        {"$divide": ["$total_raid_medals", "$total_raids"]}
-                    ]
-                },
-                "average_destruction": {
-                    "$cond": [
-                        {"$eq": ["$total_attacks", 0]},
-                        0,
-                        {"$divide": ["$total_destruction", "$total_attacks"]}
-                    ]
-                }
+                "average_capital_gold_per_raid": _safe_divide_expression("$total_capital_gold_looted", TOTAL_RAIDS_FIELD),
+                "average_raid_medals_per_raid": _safe_divide_expression("$total_raid_medals", TOTAL_RAIDS_FIELD),
+                "average_destruction": _safe_divide_expression("$total_destruction", "$total_attacks")
             }
         },
         {"$sort": {"total_capital_gold_looted": -1}}

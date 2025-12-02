@@ -315,7 +315,7 @@ class DiscordAPI:
         if self._session and not self._session.closed:
             await self._session.close()
 
-    async def __aenter__(self):
+    def __aenter__(self):
         """Async context manager entry."""
         return self
 

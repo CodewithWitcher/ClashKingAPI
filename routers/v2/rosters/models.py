@@ -1,6 +1,10 @@
 from typing import List, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field
 
+# Constants for field descriptions
+ROSTER_SIGNUP_CATEGORY_REF = 'Reference to roster_signup_categories.custom_id'
+DISCORD_SERVER_ID_DESC = 'Discord server ID'
+
 
 class CreateRosterModel(BaseModel):
     clan_tag: Optional[str] = Field(
@@ -55,7 +59,7 @@ class RosterMemberModel(BaseModel):
     trophies: int = Field(..., description='Current trophies')
     sub: bool = Field(False, description='Is this player a substitute')
     signup_group: Optional[str] = Field(
-        None, description='Reference to roster_signup_categories.custom_id'
+        None, description=ROSTER_SIGNUP_CATEGORY_REF
     )
 
     # Enhanced fields per requirements
@@ -93,7 +97,7 @@ class AddMembersByTagModel(BaseModel):
         )
         signup_group: Optional[str] = Field(
             default=None,
-            description='Reference to roster_signup_categories.custom_id',
+            description=ROSTER_SIGNUP_CATEGORY_REF,
         )
 
     members: list[MemberTag] = Field(
@@ -106,7 +110,7 @@ class UpdateMemberModel(BaseModel):
 
     sub: Optional[bool] = None
     signup_group: Optional[str] = Field(
-        None, description='Reference to roster_signup_categories.custom_id'
+        None, description=ROSTER_SIGNUP_CATEGORY_REF
     )
 
 
@@ -122,7 +126,7 @@ class TemplateFiltersModel(BaseModel):
 class EventMissingMembersModel(BaseModel):
     """Filter model for finding missing members across all rosters of a specific event type"""
 
-    server_id: int = Field(..., description='Discord server ID')
+    server_id: int = Field(..., description=DISCORD_SERVER_ID_DESC)
     event_type: Literal[
         'cwl', 'clan-games', 'raids', 'rush', 'tournament'
     ] = Field(..., description='Event type to check')
@@ -160,7 +164,7 @@ class UpdateRosterGroupModel(BaseModel):
 class CreateRosterSignupCategoryModel(BaseModel):
     """Model for creating roster signup category categories"""
 
-    server_id: Union[int, str] = Field(..., description='Discord server ID')
+    server_id: Union[int, str] = Field(..., description=DISCORD_SERVER_ID_DESC)
     custom_id: Optional[str] = Field(None, description='Custom signup category ID (auto-generated if not provided)')
     alias: str = Field(
         ..., max_length=32, description='Display name for signup category'
@@ -181,7 +185,7 @@ class UpdateRosterSignupCategoryModel(BaseModel):
 class CreateRosterAutomationModel(BaseModel):
     """Model for creating roster automation rules"""
 
-    server_id: int = Field(..., description='Discord server ID')
+    server_id: int = Field(..., description=DISCORD_SERVER_ID_DESC)
     roster_id: Optional[str] = Field(
         None, description='Specific roster ID (optional)'
     )

@@ -1,8 +1,7 @@
+import json
 import os
-import ujson
+
 from fastapi import APIRouter
-
-
 
 
 router = APIRouter(tags=["Game Data"])
@@ -20,7 +19,7 @@ async def json(data_type: str):
     if data_type == "list":
         return {"types" : ["troops", "heroes", "hero_equipment", "spells", "buildings", "pets", "supers", "townhalls", "translations"]}
     file_name = f"assets/json/{data_type}.json"
-    file_path = os.getcwd() + "/" + file_name
-    with open(file_path) as json_file:
-        data = ujson.load(json_file)
+    file_path = os.path.join(os.getcwd(), file_name)
+    with open(file_path, mode='r', encoding='utf-8') as json_file:
+        data = json.load(json_file)
         return data

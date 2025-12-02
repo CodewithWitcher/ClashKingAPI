@@ -14,6 +14,30 @@ import linkd
 
 router = APIRouter(tags=["Clan Capital Endpoints"])
 
+# MongoDB field constants
+DATA_ATTACK_LOG = "$data.attackLog"
+DATA_DEFENSE_LOG = "$data.defenseLog"
+DATA_DISTRICTS = "$data.districts"
+
+
+def _validate_and_format_weekend(weekend: str) -> str:
+    """Validate weekend is complete and format to ISO string.
+
+    Args:
+        weekend: Weekend date string (YYYY-MM-DD)
+
+    Returns:
+        Formatted weekend string for MongoDB query
+
+    Raises:
+        HTTPException: 404 if weekend ended less than 4 hours ago
+    """
+    weekend_to_iso = pend.parse(weekend)
+    if (pend.now(tz=pend.UTC) - weekend_to_iso).total_seconds() <= 273600:
+        raise HTTPException(status_code=404, detail="Please wait until 4 hours after Raid Weekend is completed to collect stats")
+    weekend_to_iso = weekend_to_iso.replace(hour=7)
+    return weekend_to_iso.strftime('%Y%m%dT%H%M%S.000Z')
+
 
 #CLAN CAPITAL ENDPOINTS
 @router.get("/capital/stats/district",
@@ -22,16 +46,12 @@ router = APIRouter(tags=["Clan Capital Endpoints"])
 @cache(expire=8000000)
 @linkd.ext.fastapi.inject
 async def capital_stats_district(weekend: str, *, mongo: MongoClient):
-    weekend_to_iso = pend.parse(weekend)
-    if (pend.now(tz=pend.UTC) - weekend_to_iso).total_seconds() <= 273600:
-        raise HTTPException(status_code=404, detail="Please wait until 4 hours after Raid Weekend is completed to collect stats")
-    weekend_to_iso = weekend_to_iso.replace(hour=7)
-    weekend = weekend_to_iso.strftime('%Y%m%dT%H%M%S.000Z')
+    weekend = _validate_and_format_weekend(weekend)
     pipeline = [{"$match": {"data.startTime": weekend}},
-        {"$unwind": "$data.attackLog"},
-        {"$set": {"data": "$data.attackLog"}},
-        {"$unwind": "$data.districts"},
-        {"$set": {"data": "$data.districts"}},
+        {"$unwind": DATA_ATTACK_LOG},
+        {"$set": {"data": DATA_ATTACK_LOG}},
+        {"$unwind": DATA_DISTRICTS},
+        {"$set": {"data": DATA_DISTRICTS}},
         {"$unset": ["data.attacks", "_id"]},
          {"$match" : {"data.destructionPercent" : 100}},
          {"$group" : {"_id" : {"district_level" : "$data.districtHallLevel", "district_name" : "$data.name"},
@@ -59,11 +79,7 @@ async def capital_stats_district(weekend: str, *, mongo: MongoClient):
 @linkd.ext.fastapi.inject
 async def capital_stats_leagues(weekend: str, *, mongo: MongoClient):
     og_weekend = weekend
-    weekend_to_iso = pend.parse(weekend)
-    if (pend.now(tz=pend.UTC) - weekend_to_iso).total_seconds() <= 273600:
-        raise HTTPException(status_code=404, detail="Please wait until 4 hours after Raid Weekend is completed to collect stats")
-    weekend_to_iso = weekend_to_iso.replace(hour=7)
-    weekend = weekend_to_iso.strftime('%Y%m%dT%H%M%S.000Z')
+    weekend = _validate_and_format_weekend(weekend)
     pipeline = [
     {
         '$match': {
@@ -88,9 +104,9 @@ async def capital_stats_leagues(weekend: str, *, mongo: MongoClient):
           "totalCapitalGoldLooted" : "$data.capitalTotalLoot",
           "numMembers" : {"$size" : "$data.members"},
           "sixHitMembers" : {"$size" : {"$filter" : {"input" : "$data.members", "as": "v", "cond" : {"$eq" : ["$$v.attacks", 6]}}}},
-          "districtsDestroyed" : {"$sum": "$data.attackLog.districtsDestroyed"},
-          "raidsDone" : {"$size" : "$data.attackLog"},
-          "raidsTaken" : {"$size" : "$data.defenseLog"}
+          "districtsDestroyed" : {"$sum": f"{DATA_ATTACK_LOG}.districtsDestroyed"},
+          "raidsDone" : {"$size" : DATA_ATTACK_LOG},
+          "raidsTaken" : {"$size" : DATA_DEFENSE_LOG}
         }
         }, {
         '$unset': [

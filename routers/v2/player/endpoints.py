@@ -6,7 +6,7 @@ import aiohttp
 from fastapi import APIRouter, Request, HTTPException, Query
 import sentry_sdk
 
-from utils.time import get_season_raid_weeks, season_start_end, CLASH_ISO_FORMAT
+from utils.time_utils import get_season_raid_weeks, season_start_end, CLASH_ISO_FORMAT
 from utils.utils import fix_tag, remove_id_fields, bulk_requests
 from utils.database import MongoClient as Mongo
 from routers.v2.player.models import PlayerTagsRequest

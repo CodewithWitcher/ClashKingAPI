@@ -364,7 +364,7 @@ async def register_email_user(req: EmailRegisterRequest, *, mongo: MongoClient) 
                 )
 
         # Prepare email encryption and user data
-        email_data = await prepare_email_for_storage(req.email)
+        email_data = prepare_email_for_storage(req.email)
 
         # Generate 6-digit verification code
         verification_code = generate_verification_code()
@@ -737,7 +737,7 @@ async def link_email_account(
             raise HTTPException(status_code=400, detail="Email already linked to another account")
 
         # Prepare encrypted email data
-        email_data = await prepare_email_for_storage(req.email)
+        email_data = prepare_email_for_storage(req.email)
 
         await mongo.users.update_one(
             {"user_id": _user_id},

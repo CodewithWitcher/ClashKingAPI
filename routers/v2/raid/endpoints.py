@@ -10,7 +10,7 @@ from routers.v2.clan.models import ClanTagsRequest, JoinLeaveQueryParams
 from routers.v2.clan.utils import filter_leave_join, extract_join_leave_pairs, filter_join_leave, generate_stats
 from routers.v2.player.models import PlayerTagsRequest
 from utils.utils import fix_tag, remove_id_fields
-from utils.time import gen_season_date, gen_raid_date, season_start_end
+from utils.time_utils import gen_season_date, gen_raid_date, season_start_end
 from utils.database import MongoClient
 from utils.sentry_utils import capture_endpoint_errors
 

@@ -2,14 +2,43 @@
 Cache decorator for API endpoints to prevent duplicate Discord API calls
 """
 import functools
-import hashlib
-import json
 import time
 from typing import Any, Callable, Optional
 
 # Simple in-memory cache
 _cache: dict[str, tuple[Any, float]] = {}
 _DEFAULT_TTL = 30  # 30 seconds
+
+
+def _build_cache_key_parts(func_name: str, args: tuple, kwargs: dict) -> list[str]:
+    """Build cache key parts from function arguments."""
+    parts = [func_name]
+
+    # Add positional args to key
+    for arg in args:
+        if isinstance(arg, (str, int, float, bool)):
+            parts.append(str(arg))
+
+    # Add keyword args to key
+    for k, v in sorted(kwargs.items()):
+        if isinstance(v, (str, int, float, bool)):
+            parts.append(f"{k}={v}")
+
+    return parts
+
+
+def _get_cached_value(cache_key: str, ttl: int) -> tuple[Any, bool]:
+    """Get value from cache if valid, return (value, is_valid)."""
+    if cache_key not in _cache:
+        return None, False
+
+    cached_value, cached_time = _cache[cache_key]
+    if time.time() - cached_time < ttl:
+        return cached_value, True
+
+    # Expired, remove from cache
+    del _cache[cache_key]
+    return None, False
 
 
 def cache_endpoint(ttl: int = _DEFAULT_TTL, key_prefix: str = ""):
@@ -29,28 +58,14 @@ def cache_endpoint(ttl: int = _DEFAULT_TTL, key_prefix: str = ""):
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
             # Generate cache key from function name and arguments
-            cache_key_parts = [key_prefix or func.__name__]
-
-            # Add positional args to key
-            for arg in args:
-                if isinstance(arg, (str, int, float, bool)):
-                    cache_key_parts.append(str(arg))
-
-            # Add keyword args to key
-            for k, v in sorted(kwargs.items()):
-                if isinstance(v, (str, int, float, bool)):
-                    cache_key_parts.append(f"{k}={v}")
-
+            func_name = key_prefix or func.__name__
+            cache_key_parts = _build_cache_key_parts(func_name, args, kwargs)
             cache_key = ":".join(cache_key_parts)
 
             # Check cache
-            if cache_key in _cache:
-                cached_value, cached_time = _cache[cache_key]
-                if time.time() - cached_time < ttl:
-                    return cached_value
-                else:
-                    # Expired, remove from cache
-                    del _cache[cache_key]
+            cached_value, is_valid = _get_cached_value(cache_key, ttl)
+            if is_valid:
+                return cached_value
 
             # Execute function
             result = await func(*args, **kwargs)

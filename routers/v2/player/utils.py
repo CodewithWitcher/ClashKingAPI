@@ -6,7 +6,7 @@ import pendulum as pend
 import sentry_sdk
 from routers.v2.war.utils import fetch_current_war_info_bypass
 from utils.database import MongoClient as Mongo
-from utils.time import is_raids
+from utils.time_utils import is_raids
 from utils.utils import fix_tag
 
 logger = logging.getLogger(__name__)
@@ -298,6 +298,66 @@ def finalize_season_stats(season: dict) -> None:
         season["season_duration"] = 0
 
 
+def _parse_day_and_get_season(day_str: str) -> Optional[Tuple[str, pend.DateTime, pend.DateTime]]:
+    """Parse day string and get season range.
+
+    Args:
+        day_str: Date string to parse
+
+    Returns:
+        Tuple of (season_key, season_start, season_end) or None if parsing fails
+    """
+    try:
+        day = pend.parse(day_str)
+        season_start, season_end = get_legend_season_range(day)
+        return season_start.to_date_string(), season_start, season_end
+    except (ValueError, AttributeError):
+        return None
+
+
+def _enrich_and_process_day_data(day_data: dict, season: dict, day_str: str) -> None:
+    """Enrich day data and process attacks/defenses.
+
+    Args:
+        day_data: Day data to enrich
+        season: Season data to update
+        day_str: Date string key
+    """
+    # Enrich day data based on format
+    is_new_format = "new_attacks" in day_data or "new_defenses" in day_data
+    if is_new_format:
+        enrich_day_data_new_format(day_data)
+    else:
+        enrich_day_data_old_format(day_data)
+
+    # Update season with day data
+    update_season_with_day_data(season, day_str, day_data)
+
+
+def _process_attacks_and_defenses(day_data: dict, season: dict) -> None:
+    """Process attacks and defenses for star distribution.
+
+    Args:
+        day_data: Day data containing attacks/defenses
+        season: Season data to update
+    """
+    # Process attacks
+    new_attacks = day_data.get("new_attacks", [])
+    if new_attacks:
+        process_day_attacks(new_attacks, season)
+    else:
+        old_attacks = [{"change": val} for val in day_data.get("attacks", [])]
+        process_day_attacks(old_attacks, season)
+
+    # Process defenses
+    new_defenses = day_data.get("new_defenses", [])
+    if new_defenses:
+        process_day_defenses(new_defenses, season)
+    else:
+        old_defenses = [{"change": val} for val in day_data.get("defenses", [])]
+        process_day_defenses(old_defenses, season)
+
+
 def group_legends_by_season(legends: dict) -> dict:
     """Group daily legends data into seasons with cumulative stats.
 
@@ -318,44 +378,22 @@ def group_legends_by_season(legends: dict) -> dict:
         if not isinstance(day_data, dict):
             continue  # Skip non-date keys like "streak"
 
-        try:
-            day = pend.parse(day_str)
-            season_start, season_end = get_legend_season_range(day)
-        except (ValueError, AttributeError):
+        season_info = _parse_day_and_get_season(day_str)
+        if not season_info:
             continue
 
-        season_key = season_start.to_date_string()
+        season_key, season_start, season_end = season_info
 
         if season_key not in grouped:
             grouped[season_key] = initialize_season_data(season_start, season_end)
 
         season = grouped[season_key]
 
-        # Enrich day data based on format
-        is_new_format = "new_attacks" in day_data or "new_defenses" in day_data
-        if is_new_format:
-            enrich_day_data_new_format(day_data)
-        else:
-            enrich_day_data_old_format(day_data)
+        # Enrich and process day data
+        _enrich_and_process_day_data(day_data, season, day_str)
 
-        # Update season with day data
-        update_season_with_day_data(season, day_str, day_data)
-
-        # Process attacks and defenses for star distribution
-        new_attacks = day_data.get("new_attacks", [])
-        new_defenses = day_data.get("new_defenses", [])
-
-        if new_attacks:
-            process_day_attacks(new_attacks, season)
-        else:
-            old_attacks = [{"change": val} for val in day_data.get("attacks", [])]
-            process_day_attacks(old_attacks, season)
-
-        if new_defenses:
-            process_day_defenses(new_defenses, season)
-        else:
-            old_defenses = [{"change": val} for val in day_data.get("defenses", [])]
-            process_day_defenses(old_defenses, season)
+        # Process attacks and defenses
+        _process_attacks_and_defenses(day_data, season)
 
         # Update performance ratios
         update_season_ratios(season)

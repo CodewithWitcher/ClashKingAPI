@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from utils.time import (
+from utils.time_utils import (
     gen_season_date,
     gen_raid_date,
     gen_legend_date,

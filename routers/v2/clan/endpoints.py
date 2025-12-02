@@ -9,7 +9,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Query, Request, HTTPException, Path, Depends
 from utils.utils import fix_tag, remove_id_fields
-from utils.time import gen_season_date, gen_raid_date, season_start_end
+from utils.time_utils import gen_season_date, gen_raid_date, season_start_end
 from utils.database import MongoClient as mongo
 from routers.v2.clan.models import PlayerTagsRequest, ClanTagsRequest, JoinLeaveQueryParams, RaidsRequest
 from routers.v2.clan.utils import (

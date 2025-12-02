@@ -695,7 +695,7 @@ class WarStatsExporter:
         return avg_stars, avg_destruction
 
     def _build_matchup_row(self, matchup_label: str, stars_data: dict, total_attacks: int,
-                           extra_stat: str) -> List:
+                           extra_stat: List[str]) -> List:
         """Build a row for matchup matrix table."""
         return [
             matchup_label,

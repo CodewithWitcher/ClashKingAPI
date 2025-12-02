@@ -272,7 +272,7 @@ async def clan_games(players: Annotated[List[str], Query(max_length=50)]=None,
     current_season = gen_season_date()
     if season != current_season:
         split_season = season.split("-")
-        check_time  = int(pend.datetime(int(split_season[0]), int(split_season[1]), 28, hour=8, tzinfo=utc).timestamp())
+        check_time  = int(pend.datetime(int(split_season[0]), int(split_season[1]), 28, hour=8, tz=pend.UTC).timestamp())
 
     year = int(season[:4])
     month = int(season[-2:])
@@ -716,7 +716,7 @@ async def capital_stats(players: Annotated[List[str], Query(max_length=50)]=None
 
     if not weekend_or_timestamp.isnumeric():
         split_date = weekend_or_timestamp.split("-")
-        weekend_start = int(pend.datetime(year=int(split_date[0]), month=int(split_date[1]), day=int(split_date[2]), tzinfo=utc).timestamp())
+        weekend_start = int(pend.datetime(year=int(split_date[0]), month=int(split_date[1]), day=int(split_date[2]), tz=pend.UTC).timestamp())
         print(weekend_start)
         weekend_end = weekend_start + (86400 * 4)
     else:

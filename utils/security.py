@@ -101,8 +101,8 @@ async def _try_jwt_token(token, mongo, rest, func, args, kwargs):
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
     else:
-        # If no mongo connection, skip user validation
-        user = None
+        # If no mongo connection, we cannot verify user existence
+        raise HTTPException(status_code=500, detail="An error occurred while connecting to the database")
 
     # Verify server membership if needed
     if "server_id" in kwargs:

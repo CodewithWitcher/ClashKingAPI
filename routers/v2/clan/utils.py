@@ -21,7 +21,7 @@ def create_join_leave_filters(
     filter_time: Optional[int] = 86400,
     only_type: Optional[str] = None,
     townhall: Optional[List[int]] = None,
-    type: Optional[str] = None,
+    event_type: Optional[str] = None,
     tag: Optional[List[str]] = None,
     name_contains: Optional[str] = None
 ):
@@ -38,7 +38,7 @@ def create_join_leave_filters(
         filter_time: Time window for filtering in seconds
         only_type: Filter by join/leave pattern type
         townhall: Filter by townhall levels
-        type: Filter by join or leave type
+        event_type: Filter by join or leave type
         tag: Filter by player tags
         name_contains: Filter by player name substring
 
@@ -58,78 +58,104 @@ def create_join_leave_filters(
         filter_time=filter_time,
         only_type=only_type,
         townhall=townhall,
-        type=type,
+        type=event_type,
         tag=tag,
         name_contains=name_contains
     )
 
+
+def _should_skip_leave_join_pair(curr, next_evt, min_duration_seconds):
+    """Check if a leave-join pair should be skipped based on duration."""
+    if curr["type"] != "leave" or next_evt["type"] != "join":
+        return False
+    delta = (next_evt["time"] - curr["time"]).total_seconds()
+    return delta < min_duration_seconds
+
+def _filter_events_by_tag(evts, min_duration_seconds):
+    """Filter events for a single tag, removing quick leave-join pairs."""
+    evts.sort(key=lambda evt: evt["time"])
+    skip_indices = set()
+    i = 0
+    while i < len(evts):
+        if i + 1 < len(evts) and _should_skip_leave_join_pair(evts[i], evts[i + 1], min_duration_seconds):
+            skip_indices.update([i, i + 1])
+            i += 2
+        else:
+            i += 1
+    return [evt for j, evt in enumerate(evts) if j not in skip_indices]
 
 def filter_leave_join(events: list, min_duration_seconds: int) -> list:
     """
     Remove leave-join pairs for the same player when the rejoin is within a short time window,
     regardless of the order of the events.
     """
-    from collections import defaultdict
-
     by_tag = defaultdict(list)
     for e in events:
         by_tag[e["tag"]].append(e)
 
     filtered = []
-
     for tag, evts in by_tag.items():
-        evts.sort(key=lambda e: e["time"])
-        skip_next = set()
-        i = 0
-        while i < len(evts):
-            curr = evts[i]
-            if curr["type"] == "leave" and i + 1 < len(evts):
-                next_evt = evts[i + 1]
-                if next_evt["type"] == "join":
-                    delta = (next_evt["time"] - curr["time"]).total_seconds()
-                    if delta < min_duration_seconds:
-                        skip_next.update([i, i + 1])
-                        i += 2
-                        continue
+        filtered.extend(_filter_events_by_tag(evts, min_duration_seconds))
+
+    return sorted(filtered, key=lambda x: x["time"], reverse=True)
+
+def _should_skip_join_leave_pair(e1, e2, min_duration_seconds):
+    """Check if a join-leave pair should be skipped based on duration."""
+    if e1["type"] != "join" or e2["type"] != "leave":
+        return False
+    delta = (e2["time"] - e1["time"]).total_seconds()
+    return delta < min_duration_seconds
+
+def _filter_join_leave_by_tag(evts, min_duration_seconds):
+    """Filter join-leave events for a single tag."""
+    evts.sort(key=lambda evt: evt["time"])
+    skip = set()
+    i = 0
+    while i < len(evts) - 1:
+        if _should_skip_join_leave_pair(evts[i], evts[i + 1], min_duration_seconds):
+            skip.update([i, i + 1])
+            i += 2
+        else:
             i += 1
-
-        for j, evt in enumerate(evts):
-            if j not in skip_next:
-                filtered.append(evt)
-
-    return sorted(filtered, key=lambda x: x["time"], reverse=True)  # facultatif : pour garder ordre inverse
+    return [evt for j, evt in enumerate(evts) if j not in skip]
 
 def filter_join_leave(events: list, min_duration_seconds: int) -> list:
     """
     Remove join-leave pairs for the same player when the leave happens soon after the join.
     """
-    from collections import defaultdict
-
     by_tag = defaultdict(list)
     for e in events:
         by_tag[e["tag"]].append(e)
 
     filtered = []
-
     for tag, evts in by_tag.items():
-        evts.sort(key=lambda e: e["time"])
-        skip = set()
-        i = 0
-        while i < len(evts) - 1:
-            e1 = evts[i]
-            e2 = evts[i + 1]
-            if e1["type"] == "join" and e2["type"] == "leave":
-                delta = (e2["time"] - e1["time"]).total_seconds()
-                if delta < min_duration_seconds:
-                    skip.update([i, i + 1])
-                    i += 2
-                    continue
-            i += 1
-        for j, evt in enumerate(evts):
-            if j not in skip:
-                filtered.append(evt)
+        filtered.extend(_filter_join_leave_by_tag(evts, min_duration_seconds))
 
     return sorted(filtered, key=lambda x: x["time"], reverse=True)
+
+def _matches_direction_and_types(e1, e2, direction):
+    """Check if two events match the expected direction and types."""
+    if direction == "join_leave":
+        return e1["type"] == "join" and e2["type"] == "leave"
+    if direction == "leave_join":
+        return e1["type"] == "leave" and e2["type"] == "join"
+    return False
+
+def _extract_pairs_by_tag(evts, max_duration_seconds, direction):
+    """Extract event pairs for a single tag."""
+    evts.sort(key=lambda evt: evt["time"])
+    pairs = []
+    i = 0
+    while i < len(evts) - 1:
+        e1, e2 = evts[i], evts[i + 1]
+        if _matches_direction_and_types(e1, e2, direction):
+            delta = (e2["time"] - e1["time"]).total_seconds()
+            if delta < max_duration_seconds:
+                pairs.extend([e1, e2])
+                i += 2
+                continue
+        i += 1
+    return pairs
 
 def extract_join_leave_pairs(events: list, max_duration_seconds: int, direction: str = "join_leave") -> list:
     """
@@ -141,25 +167,42 @@ def extract_join_leave_pairs(events: list, max_duration_seconds: int, direction:
         by_tag[e["tag"]].append(e)
 
     pairs = []
-
     for tag, evts in by_tag.items():
-        evts.sort(key=lambda e: e["time"])
-        i = 0
-        while i < len(evts) - 1:
-            e1 = evts[i]
-            e2 = evts[i + 1]
-            if (
-                direction == "join_leave" and e1["type"] == "join" and e2["type"] == "leave"
-                or direction == "leave_join" and e1["type"] == "leave" and e2["type"] == "join"
-            ):
-                delta = (e2["time"] - e1["time"]).total_seconds()
-                if delta < max_duration_seconds:
-                    pairs.extend([e1, e2])
-                    i += 2
-                    continue
-            i += 1
+        pairs.extend(_extract_pairs_by_tag(evts, max_duration_seconds, direction))
 
     return sorted(pairs, key=lambda x: x["time"], reverse=True)
+
+def _calculate_join_leave_time_deltas(tag_events):
+    """Calculate time deltas between join-leave pairs."""
+    time_deltas = []
+    for tag, evs in tag_events.items():
+        evs_sorted = sorted(evs, key=lambda x: x["time"])
+        for i in range(len(evs_sorted) - 1):
+            if evs_sorted[i]["type"] == "join" and evs_sorted[i + 1]["type"] == "leave":
+                delta = (evs_sorted[i + 1]["time"] - evs_sorted[i]["time"]).total_seconds()
+                time_deltas.append(delta)
+    return time_deltas
+
+def _get_players_by_last_event_type(tag_events, event_type):
+    """Get set of players whose last event was of a specific type."""
+    players = set()
+    for tag, evs in tag_events.items():
+        evs_sorted = sorted(evs, key=lambda x: x["time"])
+        if evs_sorted[-1]["type"] == event_type:
+            players.add(tag)
+    return players
+
+def _track_active_players(events):
+    """Track which players are currently active based on join/leave events."""
+    active_players = set()
+    seen_players = set()
+    for e in sorted(events, key=lambda x: x["time"]):
+        if e["type"] == "join":
+            active_players.add(e["tag"])
+        elif e["type"] == "leave":
+            active_players.discard(e["tag"])
+        seen_players.add(e["tag"])
+    return active_players, seen_players
 
 def generate_stats(events):
     join_events = [e for e in events if e["type"] == "join"]
@@ -168,27 +211,12 @@ def generate_stats(events):
     tags = [e["tag"] for e in events]
     players_by_tag = Counter(tags)
 
-    active_players = set()
-    seen_players = set()
     tag_events = defaultdict(list)
-
     for e in events:
         tag_events[e["tag"]].append(e)
 
-    for e in sorted(events, key=lambda x: x["time"]):
-        if e["type"] == "join":
-            active_players.add(e["tag"])
-        elif e["type"] == "leave":
-            active_players.discard(e["tag"])
-        seen_players.add(e["tag"])
-
-    time_deltas = []
-    for tag, evs in tag_events.items():
-        evs_sorted = sorted(evs, key=lambda x: x["time"])
-        for i in range(len(evs_sorted) - 1):
-            if evs_sorted[i]["type"] == "join" and evs_sorted[i + 1]["type"] == "leave":
-                delta = (evs_sorted[i + 1]["time"] - evs_sorted[i]["time"]).total_seconds()
-                time_deltas.append(delta)
+    active_players, seen_players = _track_active_players(events)
+    time_deltas = _calculate_join_leave_time_deltas(tag_events)
 
     hours = [e["time"].hour for e in events]
     most_common_hour = Counter(hours).most_common(1)[0][0] if hours else None
@@ -196,17 +224,8 @@ def generate_stats(events):
     top_users = Counter(tags).most_common(3)
     top_users_named = [{"tag": t, "count": c, "name": next(e['name'] for e in events if e["tag"] == t)} for t, c in top_users]
 
-    still_in_clan = set()
-    for tag, evs in tag_events.items():
-        evs_sorted = sorted(evs, key=lambda x: x["time"])
-        if evs_sorted[-1]["type"] == "join":
-            still_in_clan.add(tag)
-
-    left_and_never_came_back = set()
-    for tag, evs in tag_events.items():
-        evs_sorted = sorted(evs, key=lambda x: x["time"])
-        if evs_sorted[-1]["type"] == "leave":
-            left_and_never_came_back.add(tag)
+    still_in_clan = _get_players_by_last_event_type(tag_events, "join")
+    left_and_never_came_back = _get_players_by_last_event_type(tag_events, "leave")
 
     return {
         "total_events": len(events),
@@ -222,6 +241,48 @@ def generate_stats(events):
         "players_still_in_clan": len(still_in_clan),
         "players_left_forever": len(left_and_never_came_back),
         "most_moving_players": top_users_named,
+    }
+
+def _format_raid_summary(raid):
+    """Format a raid summary with calculated averages."""
+    if not raid:
+        return None
+    return {
+        "startTime": raid.get("startTime"),
+        "capitalTotalLoot": raid.get("capitalTotalLoot"),
+        "totalRewards": raid.get("totalRewards"),
+        "raidsCompleted": raid.get("raidsCompleted"),
+        "totalAttacks": raid.get("totalAttacks"),
+        "enemyDistrictsDestroyed": raid.get("enemyDistrictsDestroyed"),
+        "avgAttacksPerRaid": round(raid.get("totalAttacks", 0) / max(raid.get("raidsCompleted", 0), 1), 2),
+        "avgAttacksPerDistrict": round(raid.get("totalAttacks", 0) / max(raid.get("enemyDistrictsDestroyed", 0), 1), 2),
+    }
+
+def _update_best_worst_raids(raid, total_rewards, best_raid, worst_raid):
+    """Update best and worst raid trackers."""
+    updated_best = best_raid
+    updated_worst = worst_raid
+
+    if best_raid is None or total_rewards > best_raid.get("totalRewards", 0):
+        updated_best = raid.copy()
+        updated_best["totalRewards"] = total_rewards
+
+    if raid.get("state") == "ended" and (worst_raid is None or total_rewards < worst_raid.get("totalRewards", 0)):
+        updated_worst = raid.copy()
+        updated_worst["totalRewards"] = total_rewards
+
+    return updated_best, updated_worst
+
+def _calculate_raid_averages(total_loot, total_attacks, number_weeks, total_raids, total_districts_destroyed, total_offensive_rewards, total_defensive_rewards):
+    """Calculate average statistics from totals."""
+    return {
+        "avgLootPerAttack": round(total_loot / total_attacks, 2) if total_attacks else 0,
+        "avgLootPerWeek": round(total_loot / number_weeks, 2) if number_weeks else 0,
+        "avgAttacksPerWeek": round(total_attacks / number_weeks, 2) if number_weeks else 0,
+        "avgAttacksPerRaid": round(total_attacks / total_raids, 2) if total_raids else 0,
+        "avgAttacksPerDistrict": round(total_attacks / max(total_districts_destroyed, 1), 2) if total_districts_destroyed else 0,
+        "avgOffensiveRewards": round(total_offensive_rewards / number_weeks, 2) if number_weeks else 0,
+        "avgDefensiveRewards": round(total_defensive_rewards / number_weeks, 2) if number_weeks else 0,
     }
 
 def generate_raids_clan_stats(history: list):
@@ -245,23 +306,15 @@ def generate_raids_clan_stats(history: list):
         total_defensive_rewards = raid.get("defensiveReward", 0)
         total_rewards = total_defensive_rewards + total_offensive_rewards
 
-        if best_raid is None or total_rewards > best_raid.get("totalRewards", 0):
-            best_raid = raid
-            best_raid["totalRewards"] = total_rewards
-        if raid.get("state") == "ended" and (worst_raid is None or total_rewards < worst_raid.get("totalRewards", 0)):
-            worst_raid = raid
-            worst_raid["totalRewards"] = total_rewards
+        best_raid, worst_raid = _update_best_worst_raids(raid, total_rewards, best_raid, worst_raid)
 
-    if number_weeks > 1 :
+    if number_weeks > 1:
         number_weeks -= 1
 
-    avg_loot_per_attack = total_loot / total_attacks if total_attacks else 0
-    avg_loot_per_week = total_loot / number_weeks if number_weeks else 0
-    avg_attacks_per_week = total_attacks / number_weeks if number_weeks else 0
-    avg_attacks_per_raid = total_attacks / total_raids if total_raids else 0
-    avg_offensive_rewards = total_offensive_rewards / number_weeks if number_weeks else 0
-    avg_defensive_rewards = total_defensive_rewards / number_weeks if number_weeks else 0
-
+    averages = _calculate_raid_averages(
+        total_loot, total_attacks, number_weeks, total_raids,
+        total_districts_destroyed, total_offensive_rewards, total_defensive_rewards
+    )
 
     return {
         "totalLoot": total_loot,
@@ -271,33 +324,9 @@ def generate_raids_clan_stats(history: list):
         "totalDistrictsDestroyed": total_districts_destroyed,
         "totalOffensiveRewards": total_offensive_rewards,
         "totalDefensiveRewards": total_defensive_rewards,
-        "avgLootPerAttack": round(avg_loot_per_attack, 2),
-        "avgLootPerWeek": round(avg_loot_per_week, 2),
-        "avgAttacksPerWeek": round(avg_attacks_per_week, 2),
-        "avgAttacksPerRaid": round(avg_attacks_per_raid, 2),
-        "avgAttacksPerDistrict": round(total_attacks / max(total_districts_destroyed, 1), 2) if total_districts_destroyed else 0,
-        "avgOffensiveRewards": round(avg_offensive_rewards, 2),
-        "avgDefensiveRewards": round(avg_defensive_rewards, 2),
-        "bestRaid": {
-            "startTime": best_raid.get("startTime"),
-            "capitalTotalLoot": best_raid.get("capitalTotalLoot"),
-            "totalRewards": best_raid.get("totalRewards"),
-            "raidsCompleted": best_raid.get("raidsCompleted"),
-            "totalAttacks": best_raid.get("totalAttacks"),
-            "enemyDistrictsDestroyed": best_raid.get("enemyDistrictsDestroyed"),
-            "avgAttacksPerRaid": round(best_raid.get("totalAttacks", 0) / max(best_raid.get("raidsCompleted", 0), 1), 2),
-            "avgAttacksPerDistrict": round(best_raid.get("totalAttacks", 0) / max(best_raid.get("enemyDistrictsDestroyed", 0), 1), 2),
-        } if best_raid else None,
-        "worstRaid": {
-            "startTime": worst_raid.get("startTime"),
-            "capitalTotalLoot": worst_raid.get("capitalTotalLoot"),
-            "totalRewards": worst_raid.get("totalRewards"),
-            "raidsCompleted": worst_raid.get("raidsCompleted"),
-            "totalAttacks": worst_raid.get("totalAttacks"),
-            "enemyDistrictsDestroyed": worst_raid.get("enemyDistrictsDestroyed"),
-            "avgAttacksPerRaid": round(worst_raid.get("totalAttacks", 0) / max(worst_raid.get("raidsCompleted", 0), 1), 2),
-            "avgAttacksPerDistrict": round(worst_raid.get("totalAttacks", 0) / max(worst_raid.get("enemyDistrictsDestroyed", 0), 1), 2),
-        } if worst_raid else None,
+        **averages,
+        "bestRaid": _format_raid_summary(best_raid),
+        "worstRaid": _format_raid_summary(worst_raid),
     }
 
 
@@ -318,7 +347,7 @@ def predict_rewards(history: list):
         avg_loot_per_attack = capital_loot / total_attacks
 
         # Calculate avg defense loot if available (fallback to avg_loot if not)
-        avg_def_loot = raid_season.get('defensiveReward', 0)
+        avg_def_loot = avg_loot_per_attack  # Default fallback
         def_attacks = raid_season.get('defenseLog', [])
         if def_attacks:
             total_def_loot = sum(
@@ -331,10 +360,6 @@ def predict_rewards(history: list):
             )
             if total_def_attacks > 0:
                 avg_def_loot = total_def_loot / total_def_attacks
-            else:
-                avg_def_loot = avg_loot_per_attack  # Fallback
-        else:
-            avg_def_loot = avg_loot_per_attack  # Fallback
 
         # Predict performance
         upper_bound = 5 * math.sqrt(capital_loot + 100000) - 500
@@ -569,7 +594,7 @@ def build_programmatic_join_leave_query(
     Returns:
         Tuple of (query dict, timestamp_start, timestamp_end)
     """
-    from utils.time import season_start_end
+    from utils.time_utils import season_start_end
 
     # Determine time range
     if programmatic_filters.get("current_season", True):

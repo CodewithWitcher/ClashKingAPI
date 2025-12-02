@@ -1,9 +1,10 @@
 from pydantic import BaseModel, EmailStr
+from typing import Optional
 
 
 class CocAccountRequest(BaseModel):
     player_tag: str
-    api_token: str = None
+    api_token: Optional[str] = None
 
 class UserInfo(BaseModel):
     user_id: str

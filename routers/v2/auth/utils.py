@@ -10,7 +10,6 @@ import base64
 from pydantic import EmailStr
 from utils.config import Config
 from utils.database import MongoClient
-from .models import UserInfo, AuthResponse
 
 logger = logging.getLogger(__name__)
 config = Config()
@@ -25,13 +24,13 @@ USER_NOT_FOUND = "User not found"
 ############################
 
 # Encrypt data using Fernet
-async def encrypt_data(data: str) -> str:
+def encrypt_data(data: str) -> str:
     """Encrypt data using Fernet."""
     encrypted = config.cipher.encrypt(data.encode("utf-8"))  # Returns bytes
     return base64.urlsafe_b64encode(encrypted).decode("utf-8")  # Convert to str for storage
 
 # Decrypt data using Fernet
-async def decrypt_data(data: str) -> str:
+def decrypt_data(data: str) -> str:
     """Decrypt data using Fernet."""
     try:
         data_bytes = base64.urlsafe_b64decode(data.encode("utf-8"))  # Convert back to bytes
@@ -47,13 +46,24 @@ def hash_email(email: Union[str, EmailStr]) -> str:
     return hashlib.sha256(f"{email_normalized}{config.secret_key}".encode()).hexdigest()
 
 # Encrypt and prepare email data for storage
-async def prepare_email_for_storage(email: Union[str, EmailStr]) -> dict:
+def prepare_email_for_storage(email: Union[str, EmailStr]) -> dict:
     """Encrypt email and create lookup hash."""
     email_normalized = str(email).lower().strip()
     return {
-        "email_encrypted": await encrypt_data(email_normalized),
+        "email_encrypted": encrypt_data(email_normalized),
         "email_hash": hash_email(email_normalized)
     }
+
+def add_email_to_data(data_dict: dict, user_email: Optional[str]) -> None:
+    """Add email data to dictionary if email is provided.
+
+    Args:
+        data_dict: Dictionary to update with email data
+        user_email: User email (optional)
+    """
+    if user_email:
+        email_data = prepare_email_for_storage(user_email)
+        data_dict.update(email_data)
 
 
 def generate_jwt(user_id: str, device_id: str) -> str:
@@ -116,7 +126,7 @@ async def refresh_discord_access_token(
     Refreshes the Discord access token using the stored refresh token.
     """
     try:
-        refresh_token = await decrypt_data(encrypted_refresh_token)
+        refresh_token = decrypt_data(encrypted_refresh_token)
         async with rest.acquire() as client:
             auth = await client.refresh_access_token(
                 client=config.discord_client_id,
@@ -152,7 +162,7 @@ async def get_valid_discord_access_token(
         if not encrypted_access_token or not encrypted_refresh_token:
             raise HTTPException(status_code=401, detail="Invalid stored tokens")
 
-        access_token = await decrypt_data(encrypted_access_token)
+        access_token = decrypt_data(encrypted_access_token)
 
         # Check if the access token is still valid (add a buffer of 60s to prevent expiration race condition)
         if pend.now(tz=pend.UTC).int_timestamp < discord_token["expires_at"].timestamp() - 60:
@@ -162,7 +172,7 @@ async def get_valid_discord_access_token(
         auth = await refresh_discord_access_token(encrypted_refresh_token, rest)
 
         # Encrypt and store the new access token with updated expiration time
-        new_encrypted_access = await encrypt_data(auth.access_token)
+        new_encrypted_access = encrypt_data(auth.access_token)
         new_expires_in = int(auth.expires_in.total_seconds())  # Default: 7 days (7 * 24 * 60 * 60)
 
         await mongo.auth_discord_tokens.update_one(
@@ -311,7 +321,7 @@ def create_auth_response(
     }
 
 
-async def validate_verification_record(
+def validate_verification_record(
     pending_verification: Dict[str, Any],
     email: str
 ) -> Dict[str, Any]:
@@ -420,7 +430,6 @@ async def create_new_user_from_verification(
     import sentry_sdk
     from fastapi import HTTPException
     from utils.utils import generate_custom_id
-    import pendulum as pend
 
     user_id_raw = generate_custom_id()
     user_id = str(user_id_raw)
@@ -461,7 +470,6 @@ async def create_password_reset_token(
     """
     import sentry_sdk
     from fastapi import HTTPException
-    import pendulum as pend
 
     # Check for existing unused reset token
     current_time = pend.now(tz=pend.UTC)
@@ -519,7 +527,7 @@ async def send_password_reset_with_cleanup(
 
     # Decrypt email
     try:
-        decrypted_email = await decrypt_data(user["email_encrypted"])
+        decrypted_email = decrypt_data(user["email_encrypted"])
         if not decrypted_email:
             raise ValueError("Decrypted email is empty")
     except Exception as e:
@@ -621,8 +629,8 @@ async def store_discord_tokens(
         auth: Discord OAuth token
         mongo: MongoDB client
     """
-    encrypted_access = await encrypt_data(auth.access_token)
-    encrypted_refresh = await encrypt_data(str(auth.refresh_token))
+    encrypted_access = encrypt_data(auth.access_token)
+    encrypted_refresh = encrypt_data(str(auth.refresh_token))
 
     await mongo.auth_discord_tokens.update_one(
         {"user_id": user_id, "device_id": device_id, "device_name": device_name},
@@ -651,8 +659,9 @@ async def upsert_discord_user(
         User ID
     """
     email_conditions = [{"user_id": discord_user.id}]
-    if discord_user.email:
-        email_hash = hash_email(discord_user.email)
+    user_email = getattr(discord_user, 'email', None)
+    if user_email:
+        email_hash = hash_email(user_email)
         email_conditions.append({"email_hash": email_hash})
 
     existing_user = await mongo.users.find_one({"$or": email_conditions})
@@ -667,9 +676,7 @@ async def upsert_discord_user(
             "username": discord_user.username
         }
 
-        if discord_user.email:
-            email_data = await prepare_email_for_storage(discord_user.email)
-            update_data.update(email_data)
+        add_email_to_data(update_data, user_email)
 
         await mongo.users.update_one(
             {"user_id": user_id},
@@ -684,9 +691,7 @@ async def upsert_discord_user(
             "created_at": pend.now(tz=pend.UTC)
         }
 
-        if discord_user.email:
-            email_data = await prepare_email_for_storage(discord_user.email)
-            insert_data.update(email_data)
+        add_email_to_data(insert_data, user_email)
 
         await mongo.users.insert_one(insert_data)
 
@@ -694,7 +699,8 @@ async def upsert_discord_user(
 
 
 async def find_user_by_id(user_id: str, mongo: MongoClient) -> Optional[dict]:
-    """Find user by ID, trying both string and int formats.
+    """
+    Find user by ID, trying both string and int formats.
 
     Args:
         user_id: User ID (string or int)
@@ -731,7 +737,7 @@ async def get_user_info_from_discord(
     import sentry_sdk
 
     try:
-        discord_access = await get_valid_discord_access_token(user_id, rest, mongo)
+        discord_access = await get_valid_discord_access_token(str(user_id), rest, mongo)
         async with rest.acquire(token=discord_access, token_type=hikari.TokenType.BEARER) as client:
             try:
                 user = await client.fetch_my_user()
@@ -767,7 +773,6 @@ async def find_verification_with_code(
         HTTPException: If old record format is found
     """
     from fastapi import HTTPException
-    import sentry_sdk
 
     pending = await mongo.auth_email_verifications.find_one({
         "email_hash": email_hash,

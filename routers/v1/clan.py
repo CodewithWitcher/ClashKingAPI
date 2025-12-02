@@ -11,6 +11,87 @@ import linkd
 router = APIRouter(tags=["Clan Endpoints"])
 
 
+def _build_range_filters(filters: 'ClanFilterParams') -> list[dict]:
+    """Build MongoDB range filter queries from filter parameters.
+
+    Args:
+        filters: ClanFilterParams instance
+
+    Returns:
+        List of MongoDB query conditions
+    """
+    conditions = []
+
+    # Member count filters
+    if filters.min_members:
+        conditions.append({"members": {"$gte": filters.min_members}})
+    if filters.max_members:
+        conditions.append({"members": {"$lte": filters.max_members}})
+
+    # Level filters
+    if filters.min_level:
+        conditions.append({"level": {"$gte": filters.min_level}})
+    if filters.max_level:
+        conditions.append({"level": {"$lte": filters.max_level}})
+
+    # War filters
+    if filters.min_war_win_streak:
+        conditions.append({"warWinStreak": {"$gte": filters.min_war_win_streak}})
+    if filters.min_war_wins:
+        conditions.append({"warWins": {"$gte": filters.min_war_wins}})
+
+    # Trophy filters
+    if filters.min_clan_trophies:
+        conditions.append({"clanPoints": {"$gte": filters.min_clan_trophies}})
+    if filters.max_clan_trophies:
+        conditions.append({"clanPoints": {"$gte": filters.max_clan_trophies}})
+
+    return conditions
+
+
+def _build_exact_match_filters(filters: 'ClanFilterParams') -> list[dict]:
+    """Build MongoDB exact match filter queries from filter parameters.
+
+    Args:
+        filters: ClanFilterParams instance
+
+    Returns:
+        List of MongoDB query conditions
+    """
+    conditions = []
+
+    if filters.location_id:
+        conditions.append({'location.id': filters.location_id})
+    if filters.open_type:
+        conditions.append({"type": filters.open_type})
+    if filters.capital_league:
+        conditions.append({"capitalLeague": filters.capital_league})
+    if filters.war_league:
+        conditions.append({"warLeague": filters.war_league})
+
+    return conditions
+
+
+def _build_pagination_filters(before: str | None, after: str | None) -> list[dict]:
+    """Build MongoDB pagination filter queries.
+
+    Args:
+        before: ObjectId string for pagination before cursor
+        after: ObjectId string for pagination after cursor
+
+    Returns:
+        List of MongoDB query conditions
+    """
+    conditions = []
+
+    if after:
+        conditions.append({"_id": {"$gt": ObjectId(after)}})
+    if before:
+        conditions.append({"_id": {"$lt": ObjectId(before)}})
+
+    return conditions
+
+
 class ClanFilterParams:
     def __init__(
         self,
@@ -86,55 +167,18 @@ async def clan_filter(
     *,
     mongo: MongoClient
 ):
-    queries = {'$and': []}
-    if filters.location_id:
-        queries['$and'].append({'location.id': filters.location_id})
+    # Build all filter conditions
+    all_conditions = []
+    all_conditions.extend(_build_exact_match_filters(filters))
+    all_conditions.extend(_build_range_filters(filters))
+    all_conditions.extend(_build_pagination_filters(before, after))
 
-    if filters.min_members:
-        queries['$and'].append({"members": {"$gte": filters.min_members}})
-
-    if filters.max_members:
-        queries['$and'].append({"members": {"$lte": filters.max_members}})
-
-    if filters.min_level:
-        queries['$and'].append({"level": {"$gte": filters.min_level}})
-
-    if filters.max_level:
-        queries['$and'].append({"level": {"$lte": filters.max_level}})
-
-    if filters.open_type:
-        queries['$and'].append({"type": filters.open_type})
-
-    if filters.capital_league:
-        queries['$and'].append({"capitalLeague": filters.capital_league})
-
-    if filters.war_league:
-        queries['$and'].append({"warLeague": filters.war_league})
-
-    if filters.min_war_win_streak:
-        queries['$and'].append({"warWinStreak": {"$gte": filters.min_war_win_streak}})
-
-    if filters.min_war_wins:
-        queries['$and'].append({"warWins": {"$gte": filters.min_war_wins}})
-
-    if filters.min_clan_trophies:
-        queries['$and'].append({"clanPoints": {"$gte": filters.min_clan_trophies}})
-
-    if filters.max_clan_trophies:
-        queries['$and'].append({"clanPoints": {"$gte": filters.max_clan_trophies}})
-
-    if after:
-        queries['$and'].append({"_id": {"$gt": ObjectId(after)}})
-
-    if before:
-        queries['$and'].append({"_id": {"$lt": ObjectId(before)}})
-
-
-    if not queries["$and"]:
-        queries = {}
+    # Build final query
+    queries = {'$and': all_conditions} if all_conditions else {}
 
     limit = min(limit, 1000)
     results = await mongo.basic_clan.find(queries).limit(limit).sort("_id", 1).to_list(length=limit)
+
     return_data = {"items": [], "before": "", "after": ""}
     if results:
         return_data["before"] = str(results[0].get("_id"))
