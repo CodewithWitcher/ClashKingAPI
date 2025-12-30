@@ -22,8 +22,10 @@ WORKDIR /app
 COPY pyproject.toml .
 
 # Install dependencies using uv
-RUN uv pip install --system . \
-    && apt-get remove -y build-essential gcc python3-dev \
+RUN uv pip install --system .
+
+# Now remove build dependencies to reduce image size
+RUN apt-get remove -y build-essential gcc python3-dev git \
     && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/* /root/.cache/pip
 
