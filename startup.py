@@ -9,6 +9,7 @@ from routers.v2.dates.endpoints import router as dates_router
 from routers.v2.war.endpoints import router as war_router
 from routers.v2.ui.ui import router as ui_router
 from routers.v2.config import router as config_router
+from routers.v2.internal.endpoints import router as internal_router
 from routers.v2.server.settings.endpoints import router as server_router
 from routers.v2.server.logs.endpoints import router as server_logs_router
 from routers.v2.server.reminders.endpoints import router as server_reminders_router
@@ -37,6 +38,7 @@ def define_app(app: FastAPI):
     # V2 Routers
     v2_routers = [
         config_router,
+        internal_router,
         rosters_router,
         accounts_router,
         auth_router,

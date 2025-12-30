@@ -11,6 +11,7 @@ from utils.security import check_authentication
 from utils.config import Config
 from utils.custom_coc import CustomClashClient
 from utils.sentry_utils import capture_endpoint_errors
+from utils.cache_decorator import cache_endpoint
 from .models import (
     LinkedAccount,
     MemberLinks,
@@ -53,16 +54,64 @@ async def reorder_user_accounts(mongo: MongoClient, user_id: str) -> None:
         await mongo.coc_accounts.bulk_write(updates, ordered=False)
 
 
-async def get_links_aggregation(mongo: MongoClient) -> list:
-    """Get all links grouped by user with aggregation statistics.
+@cache_endpoint(ttl=120, key_prefix="server_members_full")
+async def get_server_members_full(rest: hikari.RESTApp, server_id: int, bot_token: str) -> dict:
+    """Fetch all members for a Discord server with full member objects.
+
+    Args:
+        rest: Hikari REST client
+        server_id: Discord server ID
+        bot_token: Bot authentication token
+
+    Returns:
+        Dictionary mapping user_id (str) to member object
+    """
+    logger.debug(f"[CACHE MISS] Fetching full members from Discord for server {server_id}")
+    members_dict = {}
+    if not bot_token:
+        return members_dict
+
+    try:
+        async with rest.acquire(token=bot_token, token_type=hikari.TokenType.BOT) as client:
+            # Fetch all members from the server
+            member_count = 0
+            async for member in client.fetch_members(server_id):
+                members_dict[str(member.user.id)] = member
+                member_count += 1
+            logger.debug(f"[DISCORD API] Fetched {member_count} members for server {server_id}")
+    except Exception as e:
+        logger.warning(f"Error fetching server members for {server_id}: {e}")
+
+    return members_dict
+
+
+async def get_links_aggregation(mongo: MongoClient, server_id: int, rest: hikari.RESTApp, bot_token: str) -> tuple[list, dict]:
+    """Get all links for server members grouped by user with aggregation statistics.
 
     Args:
         mongo: MongoDB client instance
+        server_id: Discord server ID to filter members
+        rest: Hikari REST client
+        bot_token: Bot authentication token
 
     Returns:
-        List of grouped links with account counts
+        Tuple of (list of grouped links, dict of all server members)
     """
+    logger.debug(f"[AGGREGATION] Starting links aggregation for server {server_id}")
+    # Get all members for this server from Discord (with full member objects)
+    server_members_dict = await get_server_members_full(rest, server_id, bot_token)
+    logger.debug(f"[AGGREGATION] Got {len(server_members_dict)} members (from cache or Discord)")
+
+    if not server_members_dict:
+        logger.warning(f"No members found for server {server_id}")
+        return [], {}
+
+    # Convert to list of strings for MongoDB query
+    member_ids_list = list(server_members_dict.keys())
+
+    # Aggregate links only for users who are members of this server
     pipeline = [
+        {"$match": {"user_id": {"$in": member_ids_list}}},
         {"$group": {
             "_id": "$user_id",
             "links": {"$push": {
@@ -73,11 +122,12 @@ async def get_links_aggregation(mongo: MongoClient) -> list:
             "account_count": {"$sum": 1},
             "verified_count": {"$sum": {"$cond": ["$is_verified", 1, 0]}}
         }},
-        {"$sort": {"account_count": -1}}
+        {"$sort": {"account_count": -1, "_id": 1}}
     ]
 
     links_by_user_cursor = await mongo.coc_accounts.aggregate(pipeline)
-    return await links_by_user_cursor.to_list(length=None)
+    links_list = await links_by_user_cursor.to_list(length=None)
+    return links_list, server_members_dict
 
 
 async def fetch_users_from_db(mongo: MongoClient, user_ids: list) -> dict:
@@ -105,6 +155,33 @@ async def fetch_users_from_db(mongo: MongoClient, user_ids: list) -> dict:
     return {str(user["user_id"]): user for user in users_data}
 
 
+async def fetch_players_from_db(mongo: MongoClient, player_tags: list) -> dict:
+    """Fetch player data from MongoDB player_stats collection.
+
+    Args:
+        mongo: MongoDB client instance
+        player_tags: List of player tags to fetch
+
+    Returns:
+        Dictionary mapping player_tag to player data (name and town_hall)
+    """
+    players_data = await mongo.player_stats.find(
+        {"tag": {"$in": player_tags}},
+        {"_id": 0, "tag": 1, "name": 1, "townhall": 1, "town_hall": 1}
+    ).to_list(length=None)
+
+    # Build dict with player info, handle both 'townhall' and 'town_hall' field names
+    players_dict = {}
+    for player in players_data:
+        th_level = player.get("town_hall") or player.get("townhall")
+        players_dict[player["tag"]] = {
+            "name": player.get("name"),
+            "town_hall": th_level
+        }
+
+    return players_dict
+
+
 async def fetch_missing_members_from_discord(rest, server_id: int, missing_user_ids: list, bot_token: str) -> dict:
     """Fetch member data from Discord API for users not in database.
 
@@ -121,39 +198,48 @@ async def fetch_missing_members_from_discord(rest, server_id: int, missing_user_
     if not missing_user_ids or not bot_token:
         return members_dict
 
+    logger.debug(f"[DISCORD API] Fetching {len(missing_user_ids)} missing members individually")
     async with rest.acquire(token=bot_token, token_type=hikari.TokenType.BOT) as client:
+        fetched_count = 0
         for user_id in missing_user_ids:
             try:
                 member = await client.fetch_member(server_id, int(user_id))
                 members_dict[user_id] = member
+                fetched_count += 1
             except (hikari.NotFoundError, hikari.ForbiddenError):
                 continue
             except Exception as e:
                 logger.warning(f"Error fetching member {user_id}: {e}")
 
+        logger.debug(f"[DISCORD API] Successfully fetched {fetched_count}/{len(missing_user_ids)} members")
+
     return members_dict
 
 
-def build_member_links_object(group: dict, users_dict: dict, members_dict: dict) -> MemberLinks:
+def build_member_links_object(group: dict, users_dict: dict, members_dict: dict, players_dict: dict) -> MemberLinks:
     """Build MemberLinks object from grouped data.
 
     Args:
         group: Grouped link data with user_id and links
         users_dict: User data from MongoDB
         members_dict: Member data from Discord API
+        players_dict: Player data from MongoDB (name and town_hall)
 
     Returns:
         MemberLinks object with all data populated
     """
     user_id = group["_id"]
 
-    # Build linked accounts list
+    # Build linked accounts list with player info from database
     linked_accounts = []
     for link in group["links"]:
+        player_tag = link["player_tag"]
+        player_info = players_dict.get(player_tag, {})
+
         linked_accounts.append(LinkedAccount(
-            player_tag=link["player_tag"],
-            player_name=None,
-            town_hall=None,
+            player_tag=player_tag,
+            player_name=player_info.get("name"),
+            town_hall=player_info.get("town_hall"),
             is_verified=link.get("is_verified", False),
             added_at=str(link.get("added_at")) if link.get("added_at") else None
         ))
@@ -225,14 +311,21 @@ async def get_server_links(
         HTTPException: 401 if bot token invalid
         HTTPException: 500 if server error occurs
     """
+    logger.debug(f"[ENDPOINT] GET /links for server {server_id}, limit={limit}, offset={offset}")
+
     # Verify server exists
     server = await mongo.server_db.find_one({"server": server_id})
     if not server:
         raise HTTPException(status_code=404, detail=SERVER_NOT_FOUND)
 
     try:
-        # Get all links grouped by user with statistics
-        links_grouped = await get_links_aggregation(mongo)
+        import time
+        start_time = time.time()
+
+        # Get all links grouped by user with statistics for this server only
+        # Also get all server members in one go (cached)
+        links_grouped, all_server_members = await get_links_aggregation(mongo, server_id, rest, config.bot_token)
+        logger.debug(f"[PERF] Aggregation took {time.time() - start_time:.2f}s")
 
         # Calculate total stats
         total_linked_accounts = sum(group["account_count"] for group in links_grouped)
@@ -251,20 +344,26 @@ async def get_server_links(
         total_filtered = len(links_grouped)
         paginated_groups = links_grouped[offset:offset + limit]
 
-        # Strategy: MongoDB first (fast), then Discord API for missing members
+        # Use already-fetched Discord members (cached, no DB/API calls needed!)
         user_ids_to_fetch = [group["_id"] for group in paginated_groups]
+        members_dict = {uid: all_server_members[uid] for uid in user_ids_to_fetch if uid in all_server_members}
+        logger.debug(f"[PERF] Using {len(members_dict)} members from cache (0 API/DB calls)")
 
-        # Step 1: Try MongoDB first (cached user info from auth)
-        users_dict = await fetch_users_from_db(mongo, user_ids_to_fetch)
+        # Collect all player tags from paginated results and fetch player data
+        player_tags_to_fetch = []
+        for group in paginated_groups:
+            for link in group["links"]:
+                player_tags_to_fetch.append(link["player_tag"])
 
-        # Step 2: For users not in MongoDB, fetch from Discord API
-        missing_user_ids = [uid for uid in user_ids_to_fetch if uid not in users_dict]
-        members_dict = await fetch_missing_members_from_discord(rest, server_id, missing_user_ids, config.bot_token)
+        # Fetch player info (name, town_hall) from MongoDB
+        players_fetch_start = time.time()
+        players_dict = await fetch_players_from_db(mongo, player_tags_to_fetch)
+        logger.debug(f"[PERF] Player data fetch took {time.time() - players_fetch_start:.2f}s, found {len(players_dict)}/{len(player_tags_to_fetch)} players")
 
         # Build the response for paginated results
         member_links_list = []
         for group in paginated_groups:
-            member_links_list.append(build_member_links_object(group, users_dict, members_dict))
+            member_links_list.append(build_member_links_object(group, {}, members_dict, players_dict))
 
         paginated_members = member_links_list
         members_with_links = total_members_with_links

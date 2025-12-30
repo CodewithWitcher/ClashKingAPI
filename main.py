@@ -5,6 +5,7 @@ import coc
 import linkd
 import hikari
 import typing as t
+from datetime import datetime, timezone
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from startup import define_app
 import fastapi
@@ -62,6 +63,9 @@ registry.register_value(hikari.RESTApp, rest)
 
 @contextlib.asynccontextmanager
 async def lifespan(_: fastapi.FastAPI) -> t.AsyncGenerator[None, t.Any]:
+    # Record startup time
+    startup_time = datetime.now(timezone.utc)
+    registry.register_value(datetime, startup_time)
 
     try:
         await coc_client.login_with_tokens('')

@@ -131,7 +131,6 @@ class OldMongoClient:
     giveaways = clashking.get_collection('giveaways')
     tokens_db = clashking.get_collection('tokens')
     lineups = clashking.get_collection('lineups')
-    bot_sync = clashking.get_collection('bot_sync')
     bot_stats = clashking.get_collection('bot_stats')
     autoboards = clashking.get_collection('autoboards')
     number_emojis = clashking.get_collection('number_emojis')
