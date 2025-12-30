@@ -15,7 +15,7 @@ dependencies = [
     "fastapi-mail",
     "gunicorn",
     "hashids",
-    "hikari @ git+https://github.com/hikari-py/hikari.git",
+    "hikari @ git+https://github.com/hikari-py/hikari.git@2.5.0",
     "linkd",
     "matplotlib",
     "openpyxl",

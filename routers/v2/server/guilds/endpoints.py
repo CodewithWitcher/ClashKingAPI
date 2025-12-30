@@ -53,7 +53,7 @@ def build_guild_info(guild, has_bot: bool) -> GuildInfo:
     member_count = getattr(guild, 'approximate_member_count', None)
     role = get_user_role_in_guild(guild)
 
-    icon_url = str(guild.icon_url) if guild.icon_url else "https://cdn.discordapp.com/embed/avatars/0.png"
+    icon_url = str(guild.make_icon_url()) if guild.icon_hash else "https://cdn.discordapp.com/embed/avatars/0.png"
     permissions = str(getattr(guild, 'my_permissions', "0"))
     features = list(guild.features) if hasattr(guild, 'features') else []
     is_owner = getattr(guild, 'is_owner', False)
@@ -247,7 +247,7 @@ async def get_guild_details(
         return GuildDetails(
             id=str(guild.id),
             name=guild.name,
-            icon=str(guild.icon_url) if guild.icon_url else None,
+            icon=str(guild.make_icon_url()) if guild.icon_hash else None,
             owner_id=str(guild.owner_id) if guild.owner_id else None,
             features=list(guild.features) if guild.features else [],
             member_count=guild.approximate_member_count if hasattr(guild, 'approximate_member_count') else None,

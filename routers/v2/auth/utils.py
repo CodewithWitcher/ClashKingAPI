@@ -742,7 +742,7 @@ async def get_user_info_from_discord(
             try:
                 user = await client.fetch_my_user()
                 username = user.global_name or user.username
-                avatar_url = user.avatar_url.url if user.avatar_url else None
+                avatar_url = str(user.make_avatar_url()) if user.avatar_hash else None
                 return username, avatar_url
             except hikari.UnauthorizedError:
                 sentry_sdk.capture_message("Discord API error: Invalid Token", level="warning")

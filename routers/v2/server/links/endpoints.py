@@ -251,7 +251,7 @@ def build_member_links_object(group: dict, users_dict: dict, members_dict: dict,
     if member:
         username = member.user.username
         display_name = member.nickname or member.user.username
-        avatar_url = str(member.user.avatar_url) if member.user.avatar_url else None
+        avatar_url = str(member.user.make_avatar_url()) if member.user.avatar_hash else None
     elif user_data:
         username = user_data.get("username", f"User {user_id}")
         display_name = username
