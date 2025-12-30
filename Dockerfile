@@ -32,4 +32,4 @@ COPY . .
 
 EXPOSE 8010
 
-CMD ["uv", "run", "python", "main.py"]
+CMD ["python", "main.py"]
