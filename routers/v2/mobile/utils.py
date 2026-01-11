@@ -126,7 +126,7 @@ async def fetch_players_extended_data(
     async with aiohttp.ClientSession() as session:
         fetch_tasks = [
             fetch_full_player_data(
-                session, tag, mongo_data_dict.get(tag, {}), None
+                session, tag, mongo_data_dict.get(tag, {}), None, mongo
             )
             for tag in player_tags
         ]
@@ -135,7 +135,7 @@ async def fetch_players_extended_data(
     # Assemble enriched player data in parallel
     extended_results = await asyncio.gather(
         *[
-            assemble_full_player_data(tag, raid_data, war_data, mongo_data, tag_to_legends)
+            assemble_full_player_data(tag, raid_data, war_data, mongo_data, tag_to_legends, mongo)
             for tag, raid_data, war_data, mongo_data in player_results
         ]
     )

@@ -552,34 +552,36 @@ def process_legend_stats(raw_legends: dict) -> dict:
     return group_legends_by_season(raw_legends)
 
 
-async def get_legend_rankings_for_tag(tag: str, limit: int = 10) -> list[dict]:
+async def get_legend_rankings_for_tag(tag: str, limit: int = 10, mongo: MongoClient = None) -> list[dict]:
     """Get historical legend rankings for a player tag.
 
     Args:
         tag: Player tag
         limit: Maximum number of historical rankings to return
+        mongo: MongoDB client instance
 
     Returns:
         List of historical ranking records sorted by season (most recent first)
     """
     tag = fix_tag(tag)
-    results = await Mongo.history_db.find({"tag": tag}).sort("season", -1).limit(limit).to_list(length=None)
+    results = await mongo.history_db.find({"tag": tag}).sort("season", -1).limit(limit).to_list(length=None)
     for result in results:
         result.pop("_id", None)
     return results
 
 
-async def get_current_rankings(tag: str) -> dict:
+async def get_current_rankings(tag: str, mongo: MongoClient = None) -> dict:
     """Get current leaderboard rankings for a player.
 
     Args:
         tag: Player tag
+        mongo: MongoDB client instance
 
     Returns:
         Dictionary containing country_code, country_name, local_rank, and global_rank.
         Returns None values if player is not ranked.
     """
-    ranking_data = await Mongo.leaderboard_db.find_one({"tag": tag}, projection={"_id": 0})
+    ranking_data = await mongo.leaderboard_db.find_one({"tag": tag}, projection={"_id": 0})
     if not ranking_data:
         ranking_data = {
             "country_code": None,
@@ -588,7 +590,7 @@ async def get_current_rankings(tag: str) -> dict:
             "global_rank": None
         }
     if ranking_data.get("global_rank") is None:
-        fallback = await Mongo.legend_rankings.find_one({"tag": tag})
+        fallback = await mongo.legend_rankings.find_one({"tag": tag})
         if fallback:
             ranking_data["global_rank"] = fallback.get("rank")
     return ranking_data
@@ -669,7 +671,7 @@ async def fetch_raid_data(session, tag: str, player_clan_tag: str):
     return raid_data
 
 
-async def fetch_full_player_data(session, tag: str, mongo_data: dict, clan_tag: Optional[str]):
+async def fetch_full_player_data(session, tag: str, mongo_data: dict, clan_tag: Optional[str], mongo: MongoClient = None):
     """Fetch complete player data including raid and war information.
 
     Args:
@@ -677,13 +679,14 @@ async def fetch_full_player_data(session, tag: str, mongo_data: dict, clan_tag: 
         tag: Player tag
         mongo_data: Pre-fetched MongoDB player stats data
         clan_tag: Optional clan tag for raid/war context
+        mongo: MongoDB client instance
 
     Returns:
         Tuple of (tag, raid_data, war_data, mongo_data)
     """
     war_data = {}
     raid_data = await fetch_raid_data(session, tag, clan_tag) if is_raids() else {}
-    war_timer = await Mongo.war_timers.find_one({"_id": tag}, {"_id": 0}) or {}
+    war_timer = await mongo.war_timers.find_one({"_id": tag}, {"_id": 0}) or {} if mongo else {}
     if clan_tag not in war_timer.get("clans", []):
         clans_list = war_timer.get("clans", [])
         war_clan_tag = clans_list[0] if clans_list else None
@@ -692,7 +695,7 @@ async def fetch_full_player_data(session, tag: str, mongo_data: dict, clan_tag: 
     return tag, raid_data, war_data, mongo_data
 
 
-async def assemble_full_player_data(tag, raid_data, war_data, mongo_data, legends_data):
+async def assemble_full_player_data(tag, raid_data, war_data, mongo_data, legends_data, mongo: MongoClient = None):
     """Assemble complete player profile by combining all data sources.
 
     Args:
@@ -701,6 +704,7 @@ async def assemble_full_player_data(tag, raid_data, war_data, mongo_data, legend
         war_data: Current war data
         mongo_data: MongoDB tracking statistics
         legends_data: Legend league statistics by season
+        mongo: MongoDB client instance
 
     Returns:
         Complete player data dictionary with all enriched information
@@ -712,8 +716,8 @@ async def assemble_full_player_data(tag, raid_data, war_data, mongo_data, legend
     player_data.pop("legends", None)
 
     # Add additional stats
-    player_data["legend_eos_ranking"] = await get_legend_rankings_for_tag(tag)
-    player_data["rankings"] = await get_current_rankings(tag)
+    player_data["legend_eos_ranking"] = await get_legend_rankings_for_tag(tag, mongo=mongo)
+    player_data["rankings"] = await get_current_rankings(tag, mongo=mongo)
     player_data["raid_data"] = raid_data
     player_data["war_data"] = war_data
 

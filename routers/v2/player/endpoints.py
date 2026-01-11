@@ -408,7 +408,8 @@ async def get_players_extended_stats(body: PlayerTagsRequest, _request: Request,
                     session,
                     tag,
                     mongo_data_dict.get(tag, {}),
-                    body.clan_tags.get(tag) if body.clan_tags else None
+                    body.clan_tags.get(tag) if body.clan_tags else None,
+                    mongo
                 )
                 for tag in player_tags
             ]
@@ -417,7 +418,7 @@ async def get_players_extended_stats(body: PlayerTagsRequest, _request: Request,
 
         # Assemble enriched player data in parallel
         combined_results = await asyncio.gather(*[
-            assemble_full_player_data(tag, raid_data, war_data, mongo_data, tag_to_legends)
+            assemble_full_player_data(tag, raid_data, war_data, mongo_data, tag_to_legends, mongo)
             for tag, raid_data, war_data, mongo_data in player_results
         ])
 
@@ -491,11 +492,12 @@ async def get_player_extended_stats(player_tag: str, _request: Request, clan_tag
                 session,
                 fixed_tag,
                 mongo_data,
-                clan_tag
+                clan_tag,
+                mongo
             )
 
         # Assemble enriched player data
-        player_data = await assemble_full_player_data(tag, raid_data, war_data, mongo_data, tag_to_legends)
+        player_data = await assemble_full_player_data(tag, raid_data, war_data, mongo_data, tag_to_legends, mongo)
 
         return remove_id_fields(player_data)
 
@@ -550,7 +552,8 @@ async def get_players_legend_stats(body: PlayerTagsRequest, _request: Request, *
 
 
 @router.post("/players/legend_rankings", name="Get historical legend league rankings for multiple players")
-async def get_multiple_legend_rankings(body: PlayerTagsRequest, limit: int = 10):
+@linkd.ext.fastapi.inject
+async def get_multiple_legend_rankings(body: PlayerTagsRequest, limit: int = 10, *, mongo: MongoClient):
     """Retrieve historical legend league rankings for multiple players.
 
     Returns each player's best legend league finishes with timestamps.
@@ -575,7 +578,7 @@ async def get_multiple_legend_rankings(body: PlayerTagsRequest, limit: int = 10)
         results = []
 
         for tag in player_tags:
-            rankings = await get_legend_rankings_for_tag(tag, limit)
+            rankings = await get_legend_rankings_for_tag(tag, limit, mongo)
             results.append({
                 "tag": tag,
                 "rankings": rankings
