@@ -1,7 +1,7 @@
 import asyncio
 from typing import Any, Dict
 
-from fastapi import HTTPException, APIRouter, Request, Depends
+from fastapi import HTTPException, APIRouter, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import linkd
 
@@ -47,7 +47,6 @@ async def get_public_config() -> Dict[str, Any]:
 @capture_endpoint_errors
 async def app_initialization(
     body: PlayerTagsRequest,
-    request: Request,
     _user_id: str = None,
     _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
@@ -60,7 +59,6 @@ async def app_initialization(
 
     Args:
         body: PlayerTagsRequest containing list of player tags
-        request: FastAPI request object
         _user_id: Authenticated user ID (injected by @check_authentication, not directly used)
         _credentials: HTTP Bearer credentials (required for auth, not directly used)
 
@@ -116,7 +114,7 @@ async def app_initialization(
         }
 
     # Fetch all clan-related data in parallel
-    clan_data = await fetch_all_clan_data(clan_tags_list, request, mongo)
+    clan_data = await fetch_all_clan_data(clan_tags_list, mongo)
 
     # Structure the final response
     return {

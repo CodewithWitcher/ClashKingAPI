@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import List
 from utils.security import check_authentication
@@ -128,7 +128,6 @@ def build_clan_settings_update_doc(settings: ClanSettingsUpdate) -> dict:
 async def get_server_clans(
     server_id: int,
     _user_id: str = None,
-    _request: Request = None,
     _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient,
@@ -209,7 +208,6 @@ async def get_clan_settings(
     server_id: int,
     clan_tag: str,
     _user_id: str = None,
-    _request: Request = None,
     _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient,
@@ -271,7 +269,6 @@ async def update_clan_settings(
     clan_tag: str,
     settings: ClanSettingsUpdate,
     _user_id: str = None,
-    _request: Request = None,
     _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient
@@ -325,7 +322,6 @@ async def add_clan(
     server_id: int,
     clan_request: AddClanRequest,
     _user_id: str = None,
-    _request: Request = None,
     _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient,
@@ -418,7 +414,6 @@ async def remove_clan(
     server_id: int,
     clan_tag: str,
     _user_id: str = None,
-    _request: Request = None,
     _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient

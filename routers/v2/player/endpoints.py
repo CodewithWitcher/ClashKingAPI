@@ -41,14 +41,13 @@ router = APIRouter(prefix="/v2",tags=["Player"], include_in_schema=True)
 @router.post("/players/location",
              name="Get locations for a list of players")
 @linkd.ext.fastapi.inject
-async def player_location_list(_request: Request, body: PlayerTagsRequest, *, mongo: MongoClient):
+async def player_location_list(body: PlayerTagsRequest, *, mongo: MongoClient):
     """Get country/location information for a list of players.
 
     Returns location data from the leaderboard database for players who are ranked.
     Players not in any leaderboard will not appear in the response.
 
     Args:
-        _request: FastAPI request object (not used)
         body: Request body containing list of player tags
 
     Returns:
@@ -74,7 +73,7 @@ async def player_location_list(_request: Request, body: PlayerTagsRequest, *, mo
 
 @router.post("/players/sorted/{attribute}",
              name="Get players sorted by an attribute")
-async def player_sorted(attribute: str, _request: Request, body: PlayerTagsRequest):
+async def player_sorted(attribute: str, body: PlayerTagsRequest):
     """Get players sorted by a specified attribute from the API.
 
     Fetches player data from the CoC API and sorts by any attribute using dot notation.
@@ -82,7 +81,6 @@ async def player_sorted(attribute: str, _request: Request, body: PlayerTagsReque
 
     Args:
         attribute: The attribute path to sort by (supports dot notation and list lookups)
-        _request: FastAPI request object (not used)
         body: Request body containing list of player tags
 
     Returns:
@@ -125,7 +123,7 @@ async def player_sorted(attribute: str, _request: Request, body: PlayerTagsReque
 @router.post("/players/summary/{season}/top",
              name="Get summary of top stats for a list of players")
 @linkd.ext.fastapi.inject
-async def players_summary_top(season: str, _request: Request, body: PlayerTagsRequest, limit: int = 10, *, mongo: MongoClient):
+async def players_summary_top(season: str, body: PlayerTagsRequest, limit: int = 10, *, mongo: MongoClient):
     """Get top performers in various categories for a season.
 
     Returns leaderboards for donations, capital contributions, war stars, and season statistics
@@ -133,7 +131,6 @@ async def players_summary_top(season: str, _request: Request, body: PlayerTagsRe
 
     Args:
         season: Season identifier (e.g., "2023-01")
-        _request: FastAPI request object (not used)
         body: Request body containing list of player tags
         limit: Maximum number of top players to return per category (default: 10)
 
@@ -286,7 +283,7 @@ async def players_summary_top(season: str, _request: Request, body: PlayerTagsRe
 # ============================================================================
 
 @router.post("/players", name="Get basic API data for multiple players")
-async def get_players_basic_stats(body: PlayerTagsRequest, _request: Request):
+async def get_players_basic_stats(body: PlayerTagsRequest):
     """Retrieve basic Clash of Clans API data for multiple players.
 
     Fast endpoint that returns only core player information from the CoC API:
@@ -297,7 +294,6 @@ async def get_players_basic_stats(body: PlayerTagsRequest, _request: Request):
 
     Args:
         body: Request body containing list of player tags
-        _request: FastAPI request object (not used)
 
     Returns:
         Dictionary with "items" list containing basic API data for each player
@@ -346,7 +342,7 @@ async def get_players_basic_stats(body: PlayerTagsRequest, _request: Request):
 
 @router.post("/players/extended", name="Get comprehensive stats for multiple players")
 @linkd.ext.fastapi.inject
-async def get_players_extended_stats(body: PlayerTagsRequest, _request: Request, *, mongo: MongoClient):
+async def get_players_extended_stats(body: PlayerTagsRequest, *, mongo: MongoClient):
     """Retrieve comprehensive player data combining API and tracking statistics.
 
     Returns enriched player profiles including:
@@ -359,7 +355,6 @@ async def get_players_extended_stats(body: PlayerTagsRequest, _request: Request,
 
     Args:
         body: Request body containing list of player tags and optional clan_tags mapping
-        _request: FastAPI request object (not used)
 
     Returns:
         Dictionary with "items" list containing comprehensive player data
@@ -434,7 +429,7 @@ async def get_players_extended_stats(body: PlayerTagsRequest, _request: Request,
 
 @router.get("/player/{player_tag}/extended", name="Get comprehensive stats for single player")
 @linkd.ext.fastapi.inject
-async def get_player_extended_stats(player_tag: str, _request: Request, clan_tag: str = Query(None), *, mongo: MongoClient):
+async def get_player_extended_stats(player_tag: str, clan_tag: str = Query(None), *, mongo: MongoClient):
     """Retrieve comprehensive data for a single player.
 
     Same as /players/extended but optimized for single player queries.
@@ -443,7 +438,6 @@ async def get_player_extended_stats(player_tag: str, _request: Request, clan_tag
 
     Args:
         player_tag: Player tag from URL path
-        _request: FastAPI request object (not used)
         clan_tag: Optional clan tag for raid/war context
 
     Returns:
@@ -518,7 +512,7 @@ async def get_player_extended_stats(player_tag: str, _request: Request, clan_tag
 
 @router.post("/players/legend-days", name="Get legend league statistics for multiple players")
 @linkd.ext.fastapi.inject
-async def get_players_legend_stats(body: PlayerTagsRequest, _request: Request, *, mongo: MongoClient):
+async def get_players_legend_stats(body: PlayerTagsRequest, *, mongo: MongoClient):
     """Retrieve legend league daily statistics for multiple players.
 
     Returns detailed legend league performance data including:
@@ -529,7 +523,6 @@ async def get_players_legend_stats(body: PlayerTagsRequest, _request: Request, *
 
     Args:
         body: Request body containing list of player tags
-        _request: FastAPI request object (not used)
 
     Returns:
         Dictionary with "items" list containing legend league stats by season for each player
