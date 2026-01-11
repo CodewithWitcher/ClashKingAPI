@@ -84,7 +84,7 @@ async def app_initialization(
     # Fetch both basic and extended player data in parallel
     players_basic, players_extended, war_stats_result = await asyncio.gather(
         fetch_players_basic_data(player_tags),
-        fetch_players_extended_data(player_tags),
+        fetch_players_extended_data(player_tags, mongo),
         fetch_player_war_stats(body, request),
     )
 

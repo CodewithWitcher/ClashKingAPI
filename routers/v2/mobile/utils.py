@@ -19,7 +19,7 @@ from routers.v2.player.utils import (
 from routers.v2.war.endpoints import get_multiple_clan_war_summary, clan_warhits_stats, players_warhits_stats
 from routers.v2.war.models import ClanWarHitsFilter, PlayerWarhitsFilter
 from utils.utils import remove_id_fields
-from utils.database import MongoClient as mongo
+from utils.database import MongoClient
 
 logger = logging.getLogger(__name__)
 
@@ -81,12 +81,14 @@ async def fetch_players_basic_data(player_tags: List[str]) -> List[Dict[str, Any
 
 
 async def fetch_players_extended_data(
-    player_tags: List[str]
+    player_tags: List[str],
+    mongo: MongoClient
 ) -> List[Dict[str, Any]]:
     """Fetch extended player data with MongoDB tracking stats and legends data.
 
     Args:
         player_tags: List of player tags
+        mongo: MongoDB client instance
 
     Returns:
         List[Dict]: Extended player data with tracking stats
