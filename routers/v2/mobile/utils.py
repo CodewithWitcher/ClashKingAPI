@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 import aiohttp
 import pendulum as pend
-from fastapi import HTTPException, Request
+from fastapi import HTTPException
 
 from routers.v2.clan.endpoints import get_clans_stats, get_clans_capital_raids, get_multiple_clan_join_leave
 from routers.v2.clan.models import ClanTagsRequest, RaidsRequest
@@ -145,13 +145,12 @@ async def fetch_players_extended_data(
 
 
 async def fetch_all_clan_data(
-    clan_tags: List[str], request: Request, mongo: MongoClient
+    clan_tags: List[str], mongo: MongoClient
 ) -> Dict[str, Any]:
     """Fetch all clan-related data in parallel.
 
     Args:
         clan_tags: List of clan tags
-        request: FastAPI request object
         mongo: MongoDB client instance
 
     Returns:
@@ -179,7 +178,7 @@ async def fetch_all_clan_data(
     async def fetch_join_leave_data() -> Dict[str, Any]:
         """Fetch join/leave data."""
         return await get_multiple_clan_join_leave(
-            clan_tags=clan_tags, request=request, programmatic_filters=None, mongo=mongo
+            clan_tags=clan_tags, programmatic_filters=None, mongo=mongo
         )
 
     # Execute all API calls in parallel
