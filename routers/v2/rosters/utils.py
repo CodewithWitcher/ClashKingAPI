@@ -3,7 +3,7 @@ import pendulum as pend
 from bson import ObjectId
 from coc.utils import correct_tag
 
-from utils.database import MongoClient as Mongo
+from utils.database import MongoClient
 
 # Constants
 DATA_PREP_START_TIME = 'data.preparationStartTime'
@@ -73,7 +73,7 @@ def count_player_attacks(war_data: dict, player_tag: str) -> tuple[int, int]:
     return total, three_stars
 
 
-async def calculate_player_hitrate(player_tag: str, days: int = 30) -> float:
+async def calculate_player_hitrate(player_tag: str, days: int = 30, mongo: MongoClient = None) -> float:
     """Calculate player's hitrate over the last X days."""
     # Calculate time range
     end_time = pend.now(tz=pend.UTC)
@@ -104,7 +104,7 @@ async def calculate_player_hitrate(player_tag: str, days: int = 30) -> float:
     ]
 
     try:
-        wars_docs = await Mongo.clan_wars.aggregate(
+        wars_docs = await mongo.clan_wars.aggregate(
             pipeline, allowDiskUse=True
         ).to_list(length=None)
 
@@ -125,11 +125,11 @@ async def calculate_player_hitrate(player_tag: str, days: int = 30) -> float:
         return 0.0
 
 
-async def get_player_last_online(player_tag: str) -> int:
+async def get_player_last_online(player_tag: str, mongo: MongoClient = None) -> int:
     """Get player's last online timestamp from player_stats database."""
     try:
         player_tag = correct_tag(player_tag)
-        result = await Mongo.player_stats.find_one(
+        result = await mongo.player_stats.find_one(
             {'tag': player_tag}, {'last_online': 1}
         )
         return result.get('last_online', 0) if result else 0
@@ -137,7 +137,7 @@ async def get_player_last_online(player_tag: str) -> int:
         return 0
 
 
-async def calculate_player_activity(player_tag: str, days: int = 30) -> int:
+async def calculate_player_activity(player_tag: str, days: int = 30, mongo: MongoClient = None) -> int:
     """Calculate player's activity based on player_history collection."""
     try:
         player_tag = correct_tag(player_tag)
@@ -164,22 +164,22 @@ async def calculate_player_activity(player_tag: str, days: int = 30) -> int:
             {'$count': 'total_days'},
         ]
 
-        cursor = await Mongo.player_history.aggregate(pipeline)
+        cursor = await mongo.player_history.aggregate(pipeline)
         result = await cursor.to_list(length=1)
         return result[0]['total_days'] if result else 0
     except (KeyError, TypeError, IndexError):
         return 0
 
 
-async def calculate_bulk_stats(player_tags: list[str]) -> dict:
+async def calculate_bulk_stats(player_tags: list[str], mongo: MongoClient = None) -> dict:
     """Calculate hitrate, last_online, and activity for multiple players efficiently."""
     stats = {}
 
     for tag in player_tags:
         stats[tag] = {
-            'hitrate': await calculate_player_hitrate(tag),
-            'last_online': await get_player_last_online(tag),
-            'activity': await calculate_player_activity(tag),
+            'hitrate': await calculate_player_hitrate(tag, mongo=mongo),
+            'last_online': await get_player_last_online(tag, mongo=mongo),
+            'activity': await calculate_player_activity(tag, mongo=mongo),
         }
 
     return stats
@@ -198,7 +198,7 @@ def extract_discord_user_id(discord_mention: str) -> str:
 
 
 async def check_user_account_limit(
-    roster_id: str, discord_user: str, exclude_tag: str = None
+    roster_id: str, discord_user: str, exclude_tag: str = None, mongo: MongoClient = None
 ) -> tuple[bool, int, int]:
     """
     Check if adding this member would exceed the roster's account limit per user.
@@ -209,7 +209,7 @@ async def check_user_account_limit(
     except (ValueError, TypeError):
         return True, 0, 0  # Invalid ID, let other validation handle it
 
-    roster = await Mongo.rosters.find_one({'_id': _id})
+    roster = await mongo.rosters.find_one({'_id': _id})
     if not roster:
         return True, 0, 0  # Roster not found, let other validation handle it
 

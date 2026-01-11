@@ -4,11 +4,12 @@ import logging
 
 import aiohttp
 from fastapi import APIRouter, Request, HTTPException, Query
+import linkd
 import sentry_sdk
 
 from utils.time_utils import get_season_raid_weeks, season_start_end, CLASH_ISO_FORMAT
 from utils.utils import fix_tag, remove_id_fields, bulk_requests
-from utils.database import MongoClient as Mongo
+from utils.database import MongoClient
 from routers.v2.player.models import PlayerTagsRequest
 from routers.v2.player.utils import (
     get_legend_rankings_for_tag,
@@ -39,7 +40,8 @@ router = APIRouter(prefix="/v2",tags=["Player"], include_in_schema=True)
 
 @router.post("/players/location",
              name="Get locations for a list of players")
-async def player_location_list(_request: Request, body: PlayerTagsRequest):
+@linkd.ext.fastapi.inject
+async def player_location_list(_request: Request, body: PlayerTagsRequest, *, mongo: MongoClient):
     """Get country/location information for a list of players.
 
     Returns location data from the leaderboard database for players who are ranked.
@@ -57,7 +59,7 @@ async def player_location_list(_request: Request, body: PlayerTagsRequest):
     """
     try:
         player_tags = [fix_tag(tag) for tag in body.player_tags]
-        location_info = await Mongo.leaderboard_db.find(
+        location_info = await mongo.leaderboard_db.find(
             {'tag': {'$in': player_tags}},
             {'_id': 0, 'tag': 1, 'country_name': 1, 'country_code': 1}
         ).to_list(length=None)
@@ -122,7 +124,8 @@ async def player_sorted(attribute: str, _request: Request, body: PlayerTagsReque
 
 @router.post("/players/summary/{season}/top",
              name="Get summary of top stats for a list of players")
-async def players_summary_top(season: str, _request: Request, body: PlayerTagsRequest, limit: int = 10):
+@linkd.ext.fastapi.inject
+async def players_summary_top(season: str, _request: Request, body: PlayerTagsRequest, limit: int = 10, *, mongo: MongoClient):
     """Get top performers in various categories for a season.
 
     Returns leaderboards for donations, capital contributions, war stars, and season statistics
@@ -145,7 +148,7 @@ async def players_summary_top(season: str, _request: Request, body: PlayerTagsRe
         if not body.player_tags:
             raise HTTPException(status_code=400, detail=PLAYER_TAGS_EMPTY)
 
-        results = await Mongo.player_stats.find(
+        results = await mongo.player_stats.find(
             {'$and': [{'tag': {'$in': body.player_tags}}]}
         ).to_list(length=None)
 
@@ -259,7 +262,7 @@ async def players_summary_top(season: str, _request: Request, body: PlayerTagsRe
             {'$sort': {'totalStars': -1}},
             {'$limit': limit},
         ]
-        cursor = await Mongo.clan_wars.aggregate(pipeline=pipeline)
+        cursor = await mongo.clan_wars.aggregate(pipeline=pipeline)
         war_star_results = await cursor.to_list(length=None)
 
         new_data["war_stars"] = [{"tag": result["_id"], "value": result["totalStars"], "count": count}
@@ -342,7 +345,8 @@ async def get_players_basic_stats(body: PlayerTagsRequest, _request: Request):
 # ============================================================================
 
 @router.post("/players/extended", name="Get comprehensive stats for multiple players")
-async def get_players_extended_stats(body: PlayerTagsRequest, _request: Request):
+@linkd.ext.fastapi.inject
+async def get_players_extended_stats(body: PlayerTagsRequest, _request: Request, *, mongo: MongoClient):
     """Retrieve comprehensive player data combining API and tracking statistics.
 
     Returns enriched player profiles including:
@@ -371,7 +375,7 @@ async def get_players_extended_stats(body: PlayerTagsRequest, _request: Request)
         player_tags = [fix_tag(tag) for tag in body.player_tags]
 
         # Fetch MongoDB player_stats in bulk
-        players_info = await Mongo.player_stats.find(
+        players_info = await mongo.player_stats.find(
             {"tag": {"$in": player_tags}},
             {
                 "_id": 0,
@@ -394,7 +398,7 @@ async def get_players_extended_stats(body: PlayerTagsRequest, _request: Request)
         mongo_data_dict = {player["tag"]: player for player in players_info}
 
         # Load legends data in bulk
-        legends_data = await get_legend_stats_common(player_tags)
+        legends_data = await get_legend_stats_common(player_tags, mongo)
         tag_to_legends = {entry["tag"]: entry["legends_by_season"] for entry in legends_data}
 
         # Fetch API, raid & war data per player in parallel
@@ -428,7 +432,8 @@ async def get_players_extended_stats(body: PlayerTagsRequest, _request: Request)
 
 
 @router.get("/player/{player_tag}/extended", name="Get comprehensive stats for single player")
-async def get_player_extended_stats(player_tag: str, _request: Request, clan_tag: str = Query(None)):
+@linkd.ext.fastapi.inject
+async def get_player_extended_stats(player_tag: str, _request: Request, clan_tag: str = Query(None), *, mongo: MongoClient):
     """Retrieve comprehensive data for a single player.
 
     Same as /players/extended but optimized for single player queries.
@@ -453,7 +458,7 @@ async def get_player_extended_stats(player_tag: str, _request: Request, clan_tag
 
         fixed_tag = fix_tag(player_tag)
 
-        mongo_data = await Mongo.player_stats.find_one(
+        mongo_data = await mongo.player_stats.find_one(
             {"tag": fixed_tag},
             {
                 '_id': 0,
@@ -477,7 +482,7 @@ async def get_player_extended_stats(player_tag: str, _request: Request, clan_tag
             mongo_data = {}
 
         # Load legends data
-        legends_data_list = await get_legend_stats_common([fixed_tag])
+        legends_data_list = await get_legend_stats_common([fixed_tag], mongo)
         tag_to_legends = {entry["tag"]: entry["legends_by_season"] for entry in legends_data_list}
 
         # Fetch API, raid & war data
@@ -510,7 +515,8 @@ async def get_player_extended_stats(player_tag: str, _request: Request, clan_tag
 # ============================================================================
 
 @router.post("/players/legend-days", name="Get legend league statistics for multiple players")
-async def get_players_legend_stats(body: PlayerTagsRequest, _request: Request):
+@linkd.ext.fastapi.inject
+async def get_players_legend_stats(body: PlayerTagsRequest, _request: Request, *, mongo: MongoClient):
     """Retrieve legend league daily statistics for multiple players.
 
     Returns detailed legend league performance data including:
@@ -534,7 +540,7 @@ async def get_players_legend_stats(body: PlayerTagsRequest, _request: Request):
         raise HTTPException(status_code=400, detail=PLAYER_TAGS_EMPTY)
 
     try:
-        return {"items": await get_legend_stats_common(body.player_tags)}
+        return {"items": await get_legend_stats_common(body.player_tags, mongo)}
     except HTTPException:
         raise
     except Exception as e:

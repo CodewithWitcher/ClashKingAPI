@@ -3,7 +3,7 @@ import linkd.ext.fastapi
 from fastapi import APIRouter, Query, Request
 from utils.utils import fix_tag
 from utils.security import check_authentication
-from utils.database import MongoClient as Mongo
+from utils.database import MongoClient
 from utils.custom_coc import CustomClashClient
 
 from routers.v2.search.utils import (
@@ -226,11 +226,14 @@ async def group_create(
 
 @router.post("/search/groups/{group_id}/add/{tag}",
              name="Add a player or clan to a group")
+@linkd.ext.fastapi.inject
 @check_authentication
 async def group_add(
         group_id: str,
         tag: str,
         _request: Request = Request,
+        *,
+        mongo: MongoClient
 ):
     """Add a tag to a group.
 
@@ -242,7 +245,7 @@ async def group_add(
     Returns:
         Success status
     """
-    await Mongo.groups.update_one(
+    await mongo.groups.update_one(
         {"group_id": group_id},
         {"$addToSet": {"tags": fix_tag(tag)}}
     )
@@ -251,11 +254,14 @@ async def group_add(
 
 @router.post("/search/groups/{group_id}/remove/{tag}",
              name="Remove a player or clan from a group")
+@linkd.ext.fastapi.inject
 @check_authentication
 async def group_remove(
         group_id: str,
         tag: str,
         _request: Request = Request,
+        *,
+        mongo: MongoClient
 ):
     """Remove a tag from a group.
 
@@ -267,7 +273,7 @@ async def group_remove(
     Returns:
         Success status
     """
-    await Mongo.groups.update_one(
+    await mongo.groups.update_one(
         {"group_id": group_id},
         {"$pull": {"tags": fix_tag(tag)}}
     )
@@ -282,7 +288,7 @@ async def group_get(
         group_id: str,
         _request: Request = Request,
         *,
-        mongo: Mongo
+        mongo: MongoClient
 ):
     """Get details for a specific group.
 
@@ -299,10 +305,13 @@ async def group_get(
 
 @router.get("/search/groups/{user_id}/list",
             name="List groups for a user")
+@linkd.ext.fastapi.inject
 @check_authentication
 async def group_list(
         user_id: int,
         _request: Request = Request,
+        *,
+        mongo: MongoClient
 ):
     """List all groups for a user.
 
@@ -313,16 +322,19 @@ async def group_list(
     Returns:
         Dictionary with "items" list of groups
     """
-    groups = await Mongo.groups.find({"user_id": user_id}, {"_id": 0}).to_list(length=None)
+    groups = await mongo.groups.find({"user_id": user_id}, {"_id": 0}).to_list(length=None)
     return {"items": groups}
 
 
 @router.delete("/search/groups/{group_id}",
                name="Delete a specific group")
+@linkd.ext.fastapi.inject
 @check_authentication
 async def group_delete(
         group_id: int,
         _request: Request = Request,
+        *,
+        mongo: MongoClient
 ):
     """Delete a group.
 
@@ -333,5 +345,5 @@ async def group_delete(
     Returns:
         Success status
     """
-    await Mongo.groups.delete_one({"group_id": group_id})
+    await mongo.groups.delete_one({"group_id": group_id})
     return {"success": True}

@@ -5,7 +5,7 @@ from fastapi import HTTPException
 import pendulum as pend
 import sentry_sdk
 from routers.v2.war.utils import fetch_current_war_info_bypass
-from utils.database import MongoClient as Mongo
+from utils.database import MongoClient
 from utils.time_utils import is_raids
 from utils.utils import fix_tag
 
@@ -49,11 +49,12 @@ def get_legend_season_range(date: pend.DateTime) -> Tuple[pend.DateTime, pend.Da
     return season_start, season_end
 
 
-async def get_legend_stats_common(player_tags: Union[str, List[str]]) -> Union[dict, List[dict]]:
+async def get_legend_stats_common(player_tags: Union[str, List[str]], mongo: MongoClient) -> Union[dict, List[dict]]:
     """Returns enriched legend stats for a single tag or list of tags.
 
     Args:
         player_tags: A single player tag (str) or list of player tags
+        mongo: MongoDB client instance
 
     Returns:
         Single dict if input was str, List of dicts if input was List[str].
@@ -64,7 +65,7 @@ async def get_legend_stats_common(player_tags: Union[str, List[str]]) -> Union[d
     """
     if isinstance(player_tags, str):
         fixed_tag = fix_tag(player_tags)
-        player = await Mongo.player_stats.find_one(
+        player = await mongo.player_stats.find_one(
             {'tag': fixed_tag},
             {'_id': 0, 'tag': 1, 'legends': 1}
         )
@@ -77,7 +78,7 @@ async def get_legend_stats_common(player_tags: Union[str, List[str]]) -> Union[d
         }
 
     fixed_tags = [fix_tag(tag) for tag in player_tags]
-    players_info = await Mongo.player_stats.find(
+    players_info = await mongo.player_stats.find(
         {'tag': {'$in': fixed_tags}},
         {'_id': 0, 'tag': 1, 'legends': 1}
     ).to_list(length=None)

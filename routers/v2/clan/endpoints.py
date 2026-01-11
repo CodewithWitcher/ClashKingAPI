@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Query, Request, HTTPException, Path, Depends
 from utils.utils import fix_tag, remove_id_fields
 from utils.time_utils import gen_season_date, gen_raid_date, season_start_end
-from utils.database import MongoClient as mongo
+from utils.database import MongoClient
 from routers.v2.clan.models import PlayerTagsRequest, ClanTagsRequest, JoinLeaveQueryParams, RaidsRequest
 from routers.v2.clan.utils import (
     generate_stats,
@@ -352,12 +352,15 @@ async def clan_join_leave(
 
 
 @router.post("/clans/join-leave", name="Join Leaves in a season")
+@linkd.ext.fastapi.inject
 async def get_multiple_clan_join_leave(
     body: ClanTagsRequest = None,
     filters: JoinLeaveQueryParams = Depends(),
     # Programmatic parameters
     clan_tags: list[str] = None,
-    programmatic_filters: dict = None
+    programmatic_filters: dict = None,
+    *,
+    mongo: MongoClient
 ):
     """Unified function for both FastAPI endpoint and programmatic calls.
 
@@ -380,10 +383,10 @@ async def get_multiple_clan_join_leave(
         # Determine call type and get clan tags
         if clan_tags is not None:
             # Programmatic call
-            return await _process_programmatic_join_leave(clan_tags, programmatic_filters)
+            return await _process_programmatic_join_leave(clan_tags, programmatic_filters, mongo)
         else:
             # FastAPI endpoint call
-            return await _process_api_join_leave(body, filters)
+            return await _process_api_join_leave(body, filters, mongo)
 
     except HTTPException:
         raise
@@ -393,13 +396,15 @@ async def get_multiple_clan_join_leave(
 
 async def _process_programmatic_join_leave(
     clan_tags: list[str],
-    programmatic_filters: dict = None
+    programmatic_filters: dict = None,
+    mongo: MongoClient = None
 ) -> dict:
     """Process programmatic join/leave call.
 
     Args:
         clan_tags: List of clan tags
         programmatic_filters: Optional filter dict
+        mongo: MongoDB client instance
 
     Returns:
         Dict with items list
@@ -448,13 +453,15 @@ async def _process_programmatic_join_leave(
 
 async def _process_api_join_leave(
     body: ClanTagsRequest = None,
-    filters: JoinLeaveQueryParams = Depends()
+    filters: JoinLeaveQueryParams = Depends(),
+    mongo: MongoClient = None
 ) -> dict:
     """Process API join/leave call.
 
     Args:
         body: Request body with clan tags
         filters: Query parameters
+        mongo: MongoDB client instance
 
     Returns:
         Dict with items list

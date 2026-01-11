@@ -117,7 +117,7 @@ async def fetch_players_extended_data(
     mongo_data_dict = {player['tag']: player for player in players_info}
 
     # Load legends data in bulk
-    legends_data = await get_legend_stats_common(player_tags)
+    legends_data = await get_legend_stats_common(player_tags, mongo)
     tag_to_legends = {
         entry['tag']: entry['legends_by_season'] for entry in legends_data
     }
@@ -179,7 +179,7 @@ async def fetch_all_clan_data(
     async def fetch_join_leave_data() -> Dict[str, Any]:
         """Fetch join/leave data."""
         return await get_multiple_clan_join_leave(
-            clan_tags=clan_tags, request=request, programmatic_filters=None
+            clan_tags=clan_tags, request=request, programmatic_filters=None, mongo=mongo
         )
 
     # Execute all API calls in parallel

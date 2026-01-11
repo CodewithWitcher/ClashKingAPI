@@ -1,7 +1,8 @@
 
 from fastapi import APIRouter, Request
+import linkd
 from utils.utils import remove_id_fields, check_authentication
-from utils.database import MongoClient as mongo
+from utils.database import MongoClient
 
 
 router = APIRouter(prefix="/v2",tags=["Links"], include_in_schema=True)
@@ -12,8 +13,9 @@ router = APIRouter(prefix="/v2",tags=["Links"], include_in_schema=True)
 
 @router.get("/link/server/{server_id}/clan/list",
             name="Basic list of clans linked to a server")
+@linkd.ext.fastapi.inject
 @check_authentication
-async def server_clans_list(server_id: int, request: Request):
+async def server_clans_list(server_id: int, request: Request, *, mongo: MongoClient):
     result = await mongo.clan_db.find({'server': server_id}, {"name" : 1, "tag" : 1}).to_list(length=None)
     return remove_id_fields({"items" : result})
 
