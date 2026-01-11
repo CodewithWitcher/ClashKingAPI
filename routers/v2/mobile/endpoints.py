@@ -3,10 +3,12 @@ from typing import Any, Dict
 
 from fastapi import HTTPException, APIRouter, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import linkd
 
 from routers.v2.player.models import PlayerTagsRequest
 from utils.utils import fix_tag
 from utils.config import Config
+from utils.database import MongoClient
 from utils.security import check_authentication
 from utils.sentry_utils import capture_endpoint_errors
 from .utils import (
@@ -40,13 +42,16 @@ async def get_public_config() -> Dict[str, Any]:
 
 
 @router.post('/initialization', name='Initialize all account data for mobile app')
+@linkd.ext.fastapi.inject
 @check_authentication
 @capture_endpoint_errors
 async def app_initialization(
     body: PlayerTagsRequest,
     request: Request,
     _user_id: str = None,
-    _credentials: HTTPAuthorizationCredentials = Depends(security)
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
+    *,
+    mongo: MongoClient
 ) -> Dict[str, Any]:
     """Mobile app initialization endpoint - bulk fetches all account data in parallel.
 
