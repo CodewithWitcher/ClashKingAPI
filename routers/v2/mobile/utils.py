@@ -145,13 +145,14 @@ async def fetch_players_extended_data(
 
 
 async def fetch_all_clan_data(
-    clan_tags: List[str], request: Request
+    clan_tags: List[str], request: Request, mongo: MongoClient
 ) -> Dict[str, Any]:
     """Fetch all clan-related data in parallel.
 
     Args:
         clan_tags: List of clan tags
         request: FastAPI request object
+        mongo: MongoDB client instance
 
     Returns:
         Dict with all clan data:
@@ -173,7 +174,7 @@ async def fetch_all_clan_data(
             timestamp_end=int(pend.now(tz=pend.UTC).timestamp()),
             limit=50,
         )
-        return await clan_warhits_stats(mongo_filter, request)
+        return await clan_warhits_stats(mongo_filter, mongo=mongo)
 
     async def fetch_join_leave_data() -> Dict[str, Any]:
         """Fetch join/leave data."""
@@ -242,12 +243,12 @@ def extract_clan_tags_from_players(players_basic: List[Dict[str, Any]]) -> List[
     return list(clan_tags)
 
 
-async def fetch_player_war_stats(body: PlayerTagsRequest, request: Request) -> Dict[str, Any]:
+async def fetch_player_war_stats(body: PlayerTagsRequest, mongo: MongoClient) -> Dict[str, Any]:
     """Fetch player war stats with mobile app defaults (last 6 months, limit 50).
 
     Args:
         body: Request containing player tags
-        request: FastAPI request object
+        mongo: MongoDB client instance
 
     Returns:
         Dict: War statistics for players
@@ -265,4 +266,4 @@ async def fetch_player_war_stats(body: PlayerTagsRequest, request: Request) -> D
         limit=50,
     )
 
-    return await players_warhits_stats(mongo_filter, request)
+    return await players_warhits_stats(mongo_filter, mongo=mongo)

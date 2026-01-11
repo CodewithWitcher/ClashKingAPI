@@ -85,7 +85,7 @@ async def app_initialization(
     players_basic, players_extended, war_stats_result = await asyncio.gather(
         fetch_players_basic_data(player_tags),
         fetch_players_extended_data(player_tags, mongo),
-        fetch_player_war_stats(body, request),
+        fetch_player_war_stats(body, mongo),
     )
 
     # Extract clan tags from player data
@@ -116,7 +116,7 @@ async def app_initialization(
         }
 
     # Fetch all clan-related data in parallel
-    clan_data = await fetch_all_clan_data(clan_tags_list, request)
+    clan_data = await fetch_all_clan_data(clan_tags_list, request, mongo)
 
     # Structure the final response
     return {
