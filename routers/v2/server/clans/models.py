@@ -1,13 +1,13 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Union
 
 
 class MemberCountWarning(BaseModel):
     """Member count warning configuration"""
-    channel: Optional[int] = None
+    channel: Optional[str] = None
     above: Optional[int] = None
     below: Optional[int] = None
-    role: Optional[int] = None
+    role: Optional[str] = None
 
 
 class MemberCountWarningUpdate(BaseModel):
@@ -97,17 +97,17 @@ class RemoveClanResponse(BaseModel):
 
 class ClanSettings(BaseModel):
     """Clan settings for list response"""
-    generalRole: Optional[int] = None
-    leaderRole: Optional[int] = None
-    clanChannel: Optional[int] = None
+    generalRole: Optional[str] = None
+    leaderRole: Optional[str] = None
+    clanChannel: Optional[str] = None
     category: Optional[str] = None
     abbreviation: Optional[str] = None
     greeting: Optional[str] = None
     auto_greet_option: Optional[str] = None
     leadership_eval: Optional[bool] = None
-    warCountdown: Optional[int] = None
-    warTimerCountdown: Optional[int] = None
-    ban_alert_channel: Optional[int] = None
+    warCountdown: Optional[str] = None
+    warTimerCountdown: Optional[str] = None
+    ban_alert_channel: Optional[str] = None
     member_count_warning: Optional[MemberCountWarning] = None
     logs: Optional[ClanLogSettings] = None
 
@@ -127,16 +127,16 @@ class ClanSettingsDetail(BaseModel):
     tag: str
     name: str
     server: int
-    generalRole: Optional[int] = None
-    leaderRole: Optional[int] = None
-    clanChannel: Optional[int] = None
+    generalRole: Optional[str] = None
+    leaderRole: Optional[str] = None
+    clanChannel: Optional[str] = None
     category: Optional[str] = None
     abbreviation: Optional[str] = None
     greeting: Optional[str] = None
     auto_greet_option: Optional[str] = None
     leadership_eval: Optional[bool] = None
-    warCountdown: Optional[int] = None
-    warTimerCountdown: Optional[int] = None
-    ban_alert_channel: Optional[int] = None
+    warCountdown: Optional[str] = None
+    warTimerCountdown: Optional[str] = None
+    ban_alert_channel: Optional[str] = None
     member_count_warning: Optional[MemberCountWarning] = None
     logs: Optional[ClanLogSettings] = None

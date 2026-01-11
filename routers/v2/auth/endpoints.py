@@ -245,7 +245,7 @@ async def auth_discord(request: Request, *, mongo: MongoClient, rest: hikari.RES
             user_id=str(user_id),
             username=user.username,
             device_id=device_id,
-            avatar_url=user.avatar_url.url if user.avatar_url else user.default_avatar_url
+            avatar_url=str(user.make_avatar_url()) if user.avatar_hash else str(user.make_default_avatar_url())
         )
 
         await store_refresh_token(str(user_id), auth_response_data["refresh_token"], mongo)

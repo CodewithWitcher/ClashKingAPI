@@ -20,6 +20,7 @@ from routers.v2.server.roles.endpoints import router as server_roles_router
 from routers.v2.server.guilds.endpoints import router as guilds_router, guild_router
 from routers.v2.server.strikes.endpoints import router as server_strikes_router
 from routers.v2.server.bans.endpoints import router as server_bans_router
+from routers.v2.server.countdowns.endpoints import router as server_countdowns_router
 from routers.v2.capital.endpoints import router as capital_router
 from routers.v2.activity.endpoints import router as activity_router
 from routers.v2.legends.endpoints import router as legends_router
@@ -56,6 +57,7 @@ def define_app(app: FastAPI):
         server_roles_router,
         server_strikes_router,
         server_bans_router,
+        server_countdowns_router,
         capital_router,
         activity_router,
         legends_router,

@@ -8,11 +8,19 @@ import linkd
 
 from utils.database import MongoClient
 from utils.security import check_authentication
-from utils.utils import remove_id_fields
+from utils.utils import remove_id_fields, to_str
 from .models import StrikeRequest
 
 router = APIRouter(prefix="/v2/server", tags=["Server Strikes"], include_in_schema=True)
 security = HTTPBearer()
+
+
+def convert_strike_user_ids(strikes: list) -> list:
+    """Convert user ID fields to strings to preserve precision in JSON"""
+    for strike in strikes:
+        if 'added_by' in strike:
+            strike['added_by'] = to_str(strike['added_by'])
+    return strikes
 
 
 @router.get("/{server_id}/strikes",
@@ -57,6 +65,7 @@ async def get_strikes(
         ]
 
     strikes = await mongo.strike_list.find(query).sort("date_created", -1).to_list(length=None)
+    strikes = convert_strike_user_ids(strikes)
 
     return remove_id_fields({"items": strikes, "count": len(strikes)})
 
@@ -247,6 +256,7 @@ async def get_player_strike_summary(
             }
         ]
     }).sort("date_created", -1).to_list(length=None)
+    strikes = convert_strike_user_ids(strikes)
 
     total_weight = sum([s.get('strike_weight', 1) for s in strikes])
 

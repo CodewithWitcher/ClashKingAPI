@@ -5,6 +5,7 @@ from utils.security import check_authentication
 from utils.database import MongoClient
 from utils.custom_coc import CustomClashClient
 from utils.sentry_utils import capture_endpoint_errors
+from utils.utils import to_str
 from .models import (
     ClanSettingsUpdate,
     ClanSettingsResponse,
@@ -65,10 +66,10 @@ def build_member_count_warning(mcw_data: dict) -> MemberCountWarning:
         MemberCountWarning object with channel, thresholds, and role
     """
     return MemberCountWarning(
-        channel=mcw_data.get("channel"),
+        channel=to_str(mcw_data.get("channel")),
         above=mcw_data.get("above"),
         below=mcw_data.get("below"),
-        role=mcw_data.get("role")
+        role=to_str(mcw_data.get("role"))
     )
 
 
@@ -171,17 +172,17 @@ async def get_server_clans(
 
         # Build settings
         settings = ClanSettings(
-            generalRole=clan_doc.get("generalRole"),
-            leaderRole=clan_doc.get("leaderRole"),
-            clanChannel=clan_doc.get("clanChannel"),
+            generalRole=to_str(clan_doc.get("generalRole")),
+            leaderRole=to_str(clan_doc.get("leaderRole")),
+            clanChannel=to_str(clan_doc.get("clanChannel")),
             category=clan_doc.get("category"),
             abbreviation=clan_doc.get("abbreviation"),
             greeting=clan_doc.get("greeting"),
             auto_greet_option=clan_doc.get("auto_greet_option"),
             leadership_eval=clan_doc.get("leadership_eval"),
-            warCountdown=clan_doc.get("warCountdown"),
-            warTimerCountdown=clan_doc.get("warTimerCountdown"),
-            ban_alert_channel=clan_doc.get("ban_alert_channel"),
+            warCountdown=to_str(clan_doc.get("warCountdown")),
+            warTimerCountdown=to_str(clan_doc.get("warTimerCountdown")),
+            ban_alert_channel=to_str(clan_doc.get("ban_alert_channel")),
             member_count_warning=member_count_warning,
             logs=logs
         )
@@ -243,17 +244,17 @@ async def get_clan_settings(
         tag=clan_tag,
         name=clan_doc.get("name", "Unknown"),
         server=server_id,
-        generalRole=clan_doc.get("generalRole"),
-        leaderRole=clan_doc.get("leaderRole"),
-        clanChannel=clan_doc.get("clanChannel"),
+        generalRole=to_str(clan_doc.get("generalRole")),
+        leaderRole=to_str(clan_doc.get("leaderRole")),
+        clanChannel=to_str(clan_doc.get("clanChannel")),
         category=clan_doc.get("category"),
         abbreviation=clan_doc.get("abbreviation"),
         greeting=clan_doc.get("greeting"),
         auto_greet_option=clan_doc.get("auto_greet_option"),
         leadership_eval=clan_doc.get("leadership_eval"),
-        warCountdown=clan_doc.get("warCountdown"),
-        warTimerCountdown=clan_doc.get("warTimerCountdown"),
-        ban_alert_channel=clan_doc.get("ban_alert_channel"),
+        warCountdown=to_str(clan_doc.get("warCountdown")),
+        warTimerCountdown=to_str(clan_doc.get("warTimerCountdown")),
+        ban_alert_channel=to_str(clan_doc.get("ban_alert_channel")),
         member_count_warning=member_count_warning,
         logs=logs
     )

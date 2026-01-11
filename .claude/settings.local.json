@@ -9,7 +9,13 @@
       "Bash(radon cc:*)",
       "Bash(uv add:*)",
       "Bash(uv run:*)",
-      "Bash(uv pip:*)"
+      "Bash(uv pip:*)",
+      "Bash(awk:*)",
+      "Bash(kill:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(powershell \"Get-Process python* | Select-Object Id, ProcessName, StartTime\")",
+      "Bash(powershell \"Get-Process python* | Select-Object Id, ProcessName, StartTime, Path\")"
     ],
     "deny": [],
     "ask": []

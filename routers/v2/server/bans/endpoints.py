@@ -3,13 +3,26 @@ import linkd
 from fastapi import HTTPException, APIRouter, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from utils.utils import remove_id_fields
+from utils.utils import remove_id_fields, to_str
 from utils.database import MongoClient
 from utils.security import check_authentication
 from .models import BanRequest
 
 router = APIRouter(prefix="/v2/server", tags=["Server Bans"], include_in_schema=True)
 security = HTTPBearer()
+
+
+def convert_ban_user_ids(bans: list) -> list:
+    """Convert user ID fields to strings to preserve precision in JSON"""
+    for ban in bans:
+        if 'added_by' in ban:
+            ban['added_by'] = to_str(ban['added_by'])
+        # Also handle edited_by which may contain user IDs
+        if 'edited_by' in ban and isinstance(ban['edited_by'], list):
+            for edit in ban['edited_by']:
+                if 'user' in edit:
+                    edit['user'] = to_str(edit['user'])
+    return bans
 
 
 @router.get("/{server_id}/bans",
@@ -24,6 +37,7 @@ async def get_bans(
     mongo: MongoClient
 ):
     bans = await mongo.banlist.find({'server': server_id}).sort([("_id", -1)]).to_list(length=None)
+    bans = convert_ban_user_ids(bans)
     return remove_id_fields({"items": bans, "count": len(bans)})
 
 

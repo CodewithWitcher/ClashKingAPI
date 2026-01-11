@@ -1,4 +1,5 @@
 import pymongo
+from pymongo.asynchronous.collection import AsyncCollection
 
 from utils.config import Config
 
@@ -9,6 +10,65 @@ from redis import asyncio as redis
 
 
 class MongoClient(AsyncMongoClient):
+    # ClashKing database collections
+    button_store: AsyncCollection
+    coc_accounts: AsyncCollection
+    rosters: AsyncCollection
+    roster_groups: AsyncCollection
+    roster_signup_categories: AsyncCollection
+    roster_automation: AsyncCollection
+    tokens_db: AsyncCollection
+    autoboards: AsyncCollection
+
+    # Settings database collections
+    clans: AsyncCollection
+
+    # Auth database collections
+    users: AsyncCollection
+    auth_discord_tokens: AsyncCollection
+    auth_refresh_tokens: AsyncCollection
+    auth_email_verifications: AsyncCollection
+    auth_password_reset_tokens: AsyncCollection
+
+    # New Looper database collections
+    player_stats: AsyncCollection
+    leaderboard_db: AsyncCollection
+    clan_leaderboard_db: AsyncCollection
+    clan_stats: AsyncCollection
+    legend_rankings: AsyncCollection
+    player_history: AsyncCollection
+
+    # Cache database collections
+    capital_cache: AsyncCollection
+    capital: AsyncCollection
+
+    # Looper database collections
+    history_db: AsyncCollection
+    clan_wars: AsyncCollection
+    clan_join_leave: AsyncCollection
+    join_leave_history: AsyncCollection
+    war_timers: AsyncCollection
+    new_player_stats: AsyncCollection
+    raid_weekend_db: AsyncCollection
+    cwl_db: AsyncCollection
+    cwl_groups: AsyncCollection
+    war_elo: AsyncCollection
+    warhits: AsyncCollection
+    basic_clan: AsyncCollection
+
+    # Bot settings database collections
+    server_db: AsyncCollection
+    clan_db: AsyncCollection
+    reminders: AsyncCollection
+    banlist: AsyncCollection
+    strike_list: AsyncCollection
+    townhall_roles: AsyncCollection
+    legend_league_roles: AsyncCollection
+    builderhall_roles: AsyncCollection
+    builder_league_roles: AsyncCollection
+    achievement_roles: AsyncCollection
+    family_roles: AsyncCollection
+
     def __init__(self, uri: str, **kwargs):
         super().__init__(host=uri, **kwargs)
 

@@ -228,6 +228,11 @@ async def delete_from_cdn(image_url: str):
                 }
 
 
+def to_str(value) -> str | None:
+    """Convert Discord snowflake IDs to string to preserve precision in JSON"""
+    return str(value) if value is not None else None
+
+
 def remove_id_fields(data):
     return json_loads(json_util.dumps(data))
 
