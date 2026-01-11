@@ -191,7 +191,7 @@ async def fetch_all_clan_data(
         clan_war_stats_result,
         clan_war_log_result,
     ) = await asyncio.gather(
-        get_clans_stats(request, clan_request),
+        get_clans_stats(clan_request),
         fetch_join_leave_data(),
         get_clans_capital_raids(request, raids_request),
         get_multiple_clan_war_summary(clan_request, request),

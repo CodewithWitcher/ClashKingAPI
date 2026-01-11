@@ -150,10 +150,17 @@ async def refresh_discord_access_token(
             )
         return auth
     except hikari.UnauthorizedError:
-        logger.warning("Discord refresh token was rejected by Discord API")
+        logger.warning("Discord refresh token was rejected by Discord API (401)")
         raise HTTPException(
             status_code=401,
             detail="Discord refresh token expired. Please re-authenticate with Discord."
+        )
+    except hikari.BadRequestError as e:
+        # Handle 400 errors (invalid_grant, etc.)
+        logger.warning(f"Discord refresh token invalid (400): {str(e)}")
+        raise HTTPException(
+            status_code=401,
+            detail="Discord refresh token invalid or expired. Please re-authenticate with Discord."
         )
     except Exception as e:
         logger.error(f"Error refreshing Discord token: {str(e)}")
