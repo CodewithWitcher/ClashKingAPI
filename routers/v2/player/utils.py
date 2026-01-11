@@ -686,7 +686,7 @@ async def fetch_full_player_data(session, tag: str, mongo_data: dict, clan_tag: 
     """
     war_data = {}
     raid_data = await fetch_raid_data(session, tag, clan_tag) if is_raids() else {}
-    war_timer = await mongo.war_timers.find_one({"_id": tag}, {"_id": 0}) or {} if mongo else {}
+    war_timer = await mongo.war_timer.find_one({"_id": tag}, {"_id": 0}) or {} if mongo else {}
     if clan_tag not in war_timer.get("clans", []):
         clans_list = war_timer.get("clans", [])
         war_clan_tag = clans_list[0] if clans_list else None
