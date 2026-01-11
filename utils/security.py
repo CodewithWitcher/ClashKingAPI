@@ -45,7 +45,7 @@ async def _try_static_token(token, func, args, kwargs):
 
 async def _try_db_token(token, mongo, func, args, kwargs):
     """Check if token exists in database (rosters, giveaways)."""
-    token_doc = await mongo.tokens_db.find_one({"token": token})
+    token_doc = await mongo.tokens.find_one({"token": token})
     if not token_doc:
         return None
 

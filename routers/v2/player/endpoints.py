@@ -3,7 +3,7 @@ from collections import defaultdict
 import logging
 
 import aiohttp
-from fastapi import APIRouter, Request, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 import linkd
 import sentry_sdk
 

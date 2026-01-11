@@ -313,7 +313,7 @@ async def generate_access_token(
     }
 
     # Save to database
-    await mongo_client.tokens_db.insert_one(token_data)
+    await mongo_client.tokens.insert_one(token_data)
 
     # Generate dashboard URL based on token type and environment
     is_local = os.getenv('IS_LOCAL', 'false').lower() == 'true'

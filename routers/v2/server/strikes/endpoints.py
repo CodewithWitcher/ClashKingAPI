@@ -105,10 +105,10 @@ async def add_strike(
     strike_id = ''.join(secrets.choice(source) for _ in range(5)).upper()
 
     # Ensure uniqueness
-    is_used = await mongo.strikelist.find_one({'strike_id': strike_id})
+    is_used = await mongo.strike_list.find_one({'strike_id': strike_id})
     while is_used is not None:
         strike_id = ''.join(secrets.choice(source) for _ in range(5)).upper()
-        is_used = await mongo.strikelist.find_one({'strike_id': strike_id})
+        is_used = await mongo.strike_list.find_one({'strike_id': strike_id})
 
     # Calculate rollover date if specified
     rollover_timestamp = None
@@ -131,11 +131,11 @@ async def add_strike(
     if strike_data.image:
         strike_entry['image'] = strike_data.image
 
-    await mongo.strikelist.insert_one(strike_entry)
+    await mongo.strike_list.insert_one(strike_entry)
 
     # Get total strikes for this player
     gte = int(pend.now(tz=pend.UTC).timestamp())
-    total_strikes = await mongo.strikelist.find({
+    total_strikes = await mongo.strike_list.find({
         '$and': [
             {'tag': player_tag},
             {'server': server_id},
@@ -188,7 +188,7 @@ async def remove_strike(
     strike_id = strike_id.upper()
 
     # Check if strike exists
-    strike = await mongo.strikelist.find_one({
+    strike = await mongo.strike_list.find_one({
         '$and': [
             {'strike_id': strike_id},
             {'server': server_id}
@@ -202,7 +202,7 @@ async def remove_strike(
         )
 
     # Delete the strike
-    await mongo.strikelist.delete_one({
+    await mongo.strike_list.delete_one({
         '$and': [
             {'strike_id': strike_id},
             {'server': server_id}
@@ -244,7 +244,7 @@ async def get_player_strike_summary(
     """
     gte = int(pend.now(tz=pend.UTC).timestamp())
 
-    strikes = await mongo.strikelist.find({
+    strikes = await mongo.strike_list.find({
         '$and': [
             {'tag': player_tag},
             {'server': server_id},

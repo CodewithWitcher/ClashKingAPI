@@ -221,8 +221,8 @@ def _process_clan_events(events: list) -> list:
 @linkd.ext.fastapi.inject
 async def player_stat(player_tag: str, *, mongo: MongoClient):
     player_tag = player_tag and "#" + re.sub(r"[^A-Z0-9]+", "", player_tag.upper()).replace("O", "0")
-    result = await mongo.player_stats_db.find_one({"tag": player_tag})
-    lb_spot = await mongo.player_leaderboard_db.find_one({"tag": player_tag})
+    result = await mongo.player_stats.find_one({"tag": player_tag})
+    lb_spot = await mongo.player_leaderboard.find_one({"tag": player_tag})
 
     if result is None:
         raise HTTPException(status_code=404, detail="No player found")
@@ -270,10 +270,10 @@ async def player_stat(player_tag: str, *, mongo: MongoClient):
 @linkd.ext.fastapi.inject
 async def player_legend(player_tag: str, season: str = None, *, mongo: MongoClient):
     player_tag = fix_tag(player_tag)
-    result = await mongo.player_stats_db.find_one({"tag": player_tag}, projection={"name" : 1, "townhall" : 1, "legends" : 1, "tag" : 1})
+    result = await mongo.player_stats.find_one({"tag": player_tag}, projection={"name" : 1, "townhall" : 1, "legends" : 1, "tag" : 1})
     if result is None:
         raise HTTPException(status_code=404, detail="No player found")
-    ranking_data = await mongo.player_leaderboard_db.find_one({"tag": player_tag}, projection={"_id" : 0})
+    ranking_data = await mongo.player_leaderboard.find_one({"tag": player_tag}, projection={"_id" : 0})
 
     default = {"country_code": None,
                "country_name": None,
@@ -430,7 +430,7 @@ async def player_to_do(player_tags: Annotated[List[str], Query(min_length=1, max
     for player_tag in player_tags:
         player_tag = fix_tag(player_tag)
 
-        player_data = await mongo.player_stats_db.find_one({"tag" : player_tag},
+        player_data = await mongo.player_stats.find_one({"tag" : player_tag},
                                                                {"legends" : 1, "clan_games" : 1, "season_pass" : 1, "last_online" : 1})
         player_data = player_data or {}
 

@@ -63,7 +63,7 @@ async def donations(players: Annotated[List[str], Query(max_length=50)]=None,
                 "donationsReceived" : r.get("donationsReceived")
             })
     elif players:
-            stat_results = await mongo.player_stats_db.find({"tag": {"$in": [fix_tag(player) for player in players]}},
+            stat_results = await mongo.player_stats.find({"tag": {"$in": [fix_tag(player) for player in players]}},
                                                       {"tag": 1, "name": 1, "donations": 1, "townhall": 1, "clan_tag": 1}).to_list(length=None)
             player_struct = {m.get("tag"): {"tag": m.get("tag"), "name": m.get("name"), "rank": 0,
                                             "donations": m.get("donations", {}).get(season, {}).get("donated", 0),
@@ -91,7 +91,7 @@ async def donations(players: Annotated[List[str], Query(max_length=50)]=None,
                 member_to_name[m.get("tag")] = m.get("name")
         stat_results = await mongo.clan_stats.find({"tag": {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
         player_struct = {tag : {"tag" : tag, "name" : member_to_name.get(tag), "rank" : 0, "donations" : 0, "donationsReceived" : 0, "townhall" : 0, "clan_tag" : None} for tag in member_tags}
-        member_data = await mongo.player_stats_db.find({"tag" : {"$in" : member_tags}}, {"tag" : 1, "donations" : 1, "townhall" : 1}).to_list(length=None)
+        member_data = await mongo.player_stats.find({"tag" : {"$in" : member_tags}}, {"tag" : 1, "donations" : 1, "townhall" : 1}).to_list(length=None)
         for member in member_data:
             if not tied_only:
                 player_struct[member.get("tag")]["donations"] = member.get("donations", {}).get(season, {}).get("donated", 0)
@@ -175,7 +175,7 @@ async def activity(players: Annotated[List[str], Query(max_length=50)]=None,
     by_clan = defaultdict(lambda : defaultdict(int))
 
     if players:
-        stat_results = await mongo.player_stats_db.find({"tag" : {"$in" : [fix_tag(player) for player in players]}},
+        stat_results = await mongo.player_stats.find({"tag" : {"$in" : [fix_tag(player) for player in players]}},
                                                   {"tag" : 1, "name" : 1, "activity" : 1, "townhall" : 1, "last_online" : 1, "clan_tag" : 1}).to_list(length=None)
         player_struct = {m.get("tag") : {"tag" : m.get("tag"), "name" : m.get("name"), "rank" : 0,
                                          "activity" : m.get("activity", {}).get(season, 0),
@@ -196,7 +196,7 @@ async def activity(players: Annotated[List[str], Query(max_length=50)]=None,
                 member_to_name[m.get("tag")] = m.get("name")
         stat_results = await mongo.clan_stats.find({"tag": {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
         player_struct = {tag : {"tag" : tag, "name" : member_to_name.get(tag), "rank" : 0, "activity" : 0, "last_online" : 0, "townhall" : 0} for tag in member_tags}
-        member_data = await mongo.player_stats_db.find({"tag" : {"$in" : member_tags}}, {"tag" : 1, "name" : 1, "activity" : 1, "townhall" : 1, "last_online" : 1, "clan_tag" : None}).to_list(length=None)
+        member_data = await mongo.player_stats.find({"tag" : {"$in" : member_tags}}, {"tag" : 1, "name" : 1, "activity" : 1, "townhall" : 1, "last_online" : 1, "clan_tag" : None}).to_list(length=None)
         for member in member_data:
             if not tied_only:
                 player_struct[member.get("tag")]["activity"] = member.get("activity", {}).get(season, 0)
@@ -298,7 +298,7 @@ async def clan_games(players: Annotated[List[str], Query(max_length=50)]=None,
         member_stat_dict = {}
         for m in results:
             member_stat_dict[m["_id"]] = {"first": m["first"], "last": m["last"]}
-        stat_results = await mongo.player_stats_db.find({"tag" : {"$in" : [fix_tag(player) for player in players]}},
+        stat_results = await mongo.player_stats.find({"tag" : {"$in" : [fix_tag(player) for player in players]}},
                                                   {"tag" : 1, "name" : 1, "clan_games" : 1, "townhall" : 1, "clan_tag" : 1}).to_list(length=None)
         player_struct = {m.get("tag") : {"tag" : m.get("tag"), "name" : m.get("name"), "rank" : 0,
                                          "points" : m.get("clan_games", {}).get(season, {}).get("points", 0),
@@ -341,7 +341,7 @@ async def clan_games(players: Annotated[List[str], Query(max_length=50)]=None,
             member_stat_dict[m["_id"]] = {"first": m["first"], "last": m["last"]}
         stat_results = await mongo.clan_stats.find({"tag": {"$in" : [fix_tag(clan) for clan in clans]}}).to_list(length=None)
         player_struct = {tag : {"tag" : tag, "name" : member_to_name.get(tag), "rank" : 0, "points" : 0, "time_taken" : 0, "townhall" : 0, "clan_tag": None} for tag in member_tags}
-        member_data = await mongo.player_stats_db.find({"tag" : {"$in" : member_tags}}, {"tag" : 1, "name" : 1, "clan_games" : 1, "townhall" : 1}).to_list(length=None)
+        member_data = await mongo.player_stats.find({"tag" : {"$in" : member_tags}}, {"tag" : 1, "name" : 1, "clan_games" : 1, "townhall" : 1}).to_list(length=None)
         for member in member_data:
             if not tied_only:
                 player_struct[member.get("tag")]["points"] = member.get("clan_games", {}).get(season, {}).get("points", 0)
@@ -756,7 +756,7 @@ async def capital_stats(players: Annotated[List[str], Query(max_length=50)]=None
         ]
         raids = await mongo.capital.aggregate(pipeline, allowDiskUse=True).to_list(length=None)
 
-        player_stats = await mongo.player_stats_db.find({"tag" : {"$in" : players}}, {"tag" : 1, "capital_gold" : 1}).to_list(length=None)
+        player_stats = await mongo.player_stats.find({"tag" : {"$in" : players}}, {"tag" : 1, "capital_gold" : 1}).to_list(length=None)
         donated_capital = {}
         for p in player_stats:
             for date in capital_dates:
@@ -793,7 +793,7 @@ async def capital_stats(players: Annotated[List[str], Query(max_length=50)]=None
             for raid_member in raid.members:
                 player_tags.add(raid_member.tag)
 
-        player_stats = await mongo.player_stats_db.find({"tag": {"$in": list(player_tags)}}, {"tag": 1, "capital_gold": 1}).to_list(length=None)
+        player_stats = await mongo.player_stats.find({"tag": {"$in": list(player_tags)}}, {"tag": 1, "capital_gold": 1}).to_list(length=None)
         donated_capital = {}
         for p in player_stats:
             for date in capital_dates:

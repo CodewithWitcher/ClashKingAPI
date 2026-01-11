@@ -83,7 +83,7 @@ async def global_counts(*, mongo: MongoClient):
     legend_count = await mongo.legend_rankings.estimated_document_count({})
 
     # Measure player_count
-    player_count = await mongo.player_stats_db.estimated_document_count({})
+    player_count = await mongo.player_stats.estimated_document_count({})
 
     # Measure clan_count
     clan_count = await mongo.basic_clan.estimated_document_count({})

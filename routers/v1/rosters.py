@@ -23,7 +23,7 @@ templates = Jinja2Templates(directory="templates")
 async def get_form(request: Request, token: str, *, mongo: MongoClient):
     roster = await mongo.rosters.find_one({"token" : token})
     server = roster.get("server_id")
-    clans = await mongo.clans_db.find({"server" : server}, {"name" : 1, "tag" : 1}).to_list(length=None)
+    clans = await mongo.clans.find({"server" : server}, {"name" : 1, "tag" : 1}).to_list(length=None)
     clans = [f"{c.get('name')} ({c.get('tag')})" for c in clans]
     linked_clan = f"{roster.get('clan_name')} ({roster.get('clan_tag')})"
     server = await mongo.server_db.find_one({'server': server}, {'player_groups' : 1})

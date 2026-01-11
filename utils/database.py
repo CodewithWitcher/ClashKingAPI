@@ -17,8 +17,11 @@ class MongoClient(AsyncMongoClient):
     roster_groups: AsyncCollection
     roster_signup_categories: AsyncCollection
     roster_automation: AsyncCollection
-    tokens_db: AsyncCollection
+    tokens: AsyncCollection
     autoboards: AsyncCollection
+    bot_sync: AsyncCollection
+    giveaways : AsyncCollection
+    link_shortner: AsyncCollection
 
     # Settings database collections
     clans: AsyncCollection
@@ -37,6 +40,7 @@ class MongoClient(AsyncMongoClient):
     clan_stats: AsyncCollection
     legend_rankings: AsyncCollection
     player_history: AsyncCollection
+    player_stats: AsyncCollection
 
     # Cache database collections
     capital_cache: AsyncCollection
@@ -47,7 +51,7 @@ class MongoClient(AsyncMongoClient):
     clan_wars: AsyncCollection
     clan_join_leave: AsyncCollection
     join_leave_history: AsyncCollection
-    war_timers: AsyncCollection
+    war_timer: AsyncCollection
     new_player_stats: AsyncCollection
     raid_weekend_db: AsyncCollection
     cwl_db: AsyncCollection
@@ -55,8 +59,17 @@ class MongoClient(AsyncMongoClient):
     war_elo: AsyncCollection
     warhits: AsyncCollection
     basic_clan: AsyncCollection
+    legend_history: AsyncCollection
 
-    # Bot settings database collections
+    # Ranking history
+    player_leaderboard: AsyncCollection
+    player_trophies: AsyncCollection
+    player_versus_trophies: AsyncCollection
+    clan_versus_trophies: AsyncCollection
+    clan_trophies: AsyncCollection
+    capital_trophies: AsyncCollection
+
+    # Bot settings & usafam database collections
     server_db: AsyncCollection
     clan_db: AsyncCollection
     reminders: AsyncCollection
@@ -68,38 +81,40 @@ class MongoClient(AsyncMongoClient):
     builder_league_roles: AsyncCollection
     achievement_roles: AsyncCollection
     family_roles: AsyncCollection
+    bot_settings: AsyncCollection
+    ticketing: AsyncCollection
+    embeds: AsyncCollection
+    open_tickets: AsyncCollection
+    user_settings: AsyncCollection
 
     def __init__(self, uri: str, **kwargs):
         super().__init__(host=uri, **kwargs)
 
+        # ClashKing database
         self.__clashking = self.get_database('clashking')
         self.button_store = self.__clashking.get_collection('button_store')
         self.coc_accounts = self.__clashking.get_collection('coc_accounts')
         self.rosters = self.__clashking.get_collection('rosters')
         self.roster_groups = self.__clashking.get_collection('roster_groups')
-        self.roster_signup_categories = self.__clashking.get_collection(
-            'roster_signup_categories'
-        )
-        self.roster_automation = self.__clashking.get_collection(
-            'roster_automation'
-        )
-        self.tokens_db = self.__clashking.get_collection('tokens')
+        self.roster_signup_categories = self.__clashking.get_collection('roster_signup_categories')
+        self.roster_automation = self.__clashking.get_collection('roster_automation')
+        self.tokens = self.__clashking.get_collection('tokens')
         self.autoboards = self.__clashking.get_collection('autoboards')
+        self.bot_sync = self.__clashking.get_collection('bot_sync')
+        self.giveaways = self.__clashking.get_collection('giveaways')
+        self.link_shortner = self.__clashking.get_collection('short_links')
 
+        # Settings database
         self.__settings = self.get_database('settings')
         self.clans = self.__settings.get_collection('clans')
-
         self.__auth = self.get_database('auth')
         self.users = self.__auth.get_collection('users')
         self.auth_discord_tokens = self.__auth.get_collection('discord_tokens')
         self.auth_refresh_tokens = self.__auth.get_collection('refresh_tokens')
-        self.auth_email_verifications = self.__auth.get_collection(
-            'email_verifications'
-        )
-        self.auth_password_reset_tokens = self.__auth.get_collection(
-            'password_reset_tokens'
-        )
+        self.auth_email_verifications = self.__auth.get_collection('email_verifications')
+        self.auth_password_reset_tokens = self.__auth.get_collection('password_reset_tokens')
 
+        # New Looper database
         self.__new_looper = self.get_database('new_looper')
         self.player_stats = self.__new_looper.get_collection('player_stats')
         self.leaderboard_db = self.__new_looper.get_collection('leaderboard_db')
@@ -113,13 +128,13 @@ class MongoClient(AsyncMongoClient):
         self.capital_cache = self.__cache.get_collection('capital_raids')
         self.capital = self.__cache.get_collection('capital_raids')  # Alias for v1 compatibility
 
-        # Looper database (for war, raid, and tracking data)
+        # Looper database
         self.__looper = self.get_database('looper')
         self.history_db = self.__looper.get_collection('legend_history')
         self.clan_wars = self.__looper.get_collection('clan_war')
         self.clan_join_leave = self.__looper.get_collection('join_leave_history')
         self.join_leave_history = self.__looper.get_collection('join_leave_history')  # Alias for v1 compatibility
-        self.war_timers = self.__looper.get_collection('war_timer')
+        self.war_timer = self.__looper.get_collection('war_timer')
         self.new_player_stats = self.__looper.get_collection('player_stats')
         self.raid_weekend_db = self.__looper.get_collection('raid_weekends')
         self.cwl_db = self.__looper.get_collection('cwl_db')
@@ -127,27 +142,43 @@ class MongoClient(AsyncMongoClient):
         self.war_elo = self.__looper.get_collection('war_elo')
         self.warhits = self.__looper.get_collection('warhits')
         self.basic_clan = self.__looper.get_collection('clan_tags')
+        self.legend_history = self.__looper.get_collection('legend_history')
+
+        # Ranking history database
+        self.__ranking_history = self.get_database('ranking_history')
+        self.player_leaderboard = self.__ranking_history.get_collection('player_leaderboard')
+        self.player_trophies = self.__ranking_history.get_collection('player_trophies')
+        self.player_versus_trophies = self.__ranking_history.get_collection('player_versus_trophies')
+        self.clan_versus_trophies = self.__ranking_history.get_collection('clan_versus_trophies')
+        self.clan_trophies = self.__ranking_history.get_collection('clan_trophies')
+        self.capital_trophies = self.__ranking_history.get_collection('capital')  # Alias for v1 compatibility
 
         # Second connection for static_mongodb (bot settings)
         self.__static_client = pymongo.AsyncMongoClient(
             config.static_mongodb, compressors=['snappy', 'zlib']
         )
 
-        self.__bot_settings = self.__static_client.get_database('usafam')
-        self.server_db = self.__bot_settings.get_collection('server')
-        self.clan_db = self.__bot_settings.get_collection('clans')
-        self.reminders = self.__bot_settings.get_collection('reminders')
-        self.banlist = self.__bot_settings.get_collection('banlist')
-        self.strike_list = self.__bot_settings.get_collection('strikes')
+        # Usafam database
+        self.__bot_usafam = self.__static_client.get_database('usafam')
+        self.server_db = self.__bot_usafam.get_collection('server')
+        self.clan_db = self.__bot_usafam.get_collection('clans')
+        self.reminders = self.__bot_usafam.get_collection('reminders')
+        self.banlist = self.__bot_usafam.get_collection('banlist')
+        self.strike_list = self.__bot_usafam.get_collection('strikes')
+        self.townhall_roles = self.__bot_usafam.get_collection('townhallroles')
+        self.legend_league_roles = self.__bot_usafam.get_collection('legendleagueroles')
+        self.builderhall_roles = self.__bot_usafam.get_collection('builderhallroles')
+        self.builder_league_roles = self.__bot_usafam.get_collection('builderleagueroles')
+        self.achievement_roles = self.__bot_usafam.get_collection('achievementroles')
+        self.family_roles = self.__bot_usafam.get_collection('family_roles')
+        self.ticketing = self.__bot_usafam.get_collection('tickets')
+        self.embeds = self.__bot_usafam.get_collection('custom_embeds')
+        self.open_tickets = self.__bot_usafam.get_collection('open_tickets')
+        self.user_settings = self.__bot_usafam.get_collection('user_settings')
 
-        # Role management collections
-        self.townhall_roles = self.__bot_settings.get_collection('townhallroles')
-        self.legend_league_roles = self.__bot_settings.get_collection('legendleagueroles')
-        self.builderhall_roles = self.__bot_settings.get_collection('builderhallroles')
-        self.builder_league_roles = self.__bot_settings.get_collection('builderleagueroles')
-        self.achievement_roles = self.__bot_settings.get_collection('achievementroles')
-        self.family_roles = self.__bot_settings.get_collection('family_roles')
-        # Note: status_roles is stored in server_db, not as a separate collection
+        # Bot settings database
+        self.__bot = self.__static_client.get_database('bot')
+        self.bot_settings = self.__bot.get_collection('settings')
 
 
 class OldMongoClient:
@@ -183,7 +214,7 @@ class OldMongoClient:
     base_stats = looper.get_collection('base_stats')
     cwl_groups = looper.get_collection('cwl_group')
     basic_clan = looper.get_collection('clan_tags')
-    war_timers = looper.get_collection('war_timer')
+    war_timer = looper.get_collection('war_timer')
     new_player_stats = looper.get_collection('player_stats')
 
     # Collections (ClashKing)

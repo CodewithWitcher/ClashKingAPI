@@ -40,7 +40,7 @@ async def roster_dashboard(
     """Serve the roster management page using token authentication"""
     try:
         # Validate token for server access (not roster-specific)
-        token_data = await mongo.tokens_db.find_one({
+        token_data = await mongo.tokens.find_one({
             'token': token, 
             'type': 'roster',
             'server_id': server_id

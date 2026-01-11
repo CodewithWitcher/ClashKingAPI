@@ -2,7 +2,7 @@ import coc
 import hikari
 import linkd
 
-from fastapi import Request, Response, HTTPException, Depends
+from fastapi import HTTPException, Depends
 from fastapi import APIRouter, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Annotated, List, Optional

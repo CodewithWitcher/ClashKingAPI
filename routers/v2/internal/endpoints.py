@@ -4,8 +4,7 @@ import linkd
 import sys
 import platform
 import psutil
-from datetime import datetime, timezone
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter
 from utils.database import MongoClient
 from utils.security import check_authentication
 

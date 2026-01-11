@@ -14,7 +14,7 @@ router = APIRouter(tags=["Legends"])
 async def legends_clan(clan_tag: str, date: str, *, mongo: MongoClient):
     basic_clan = await mongo.basic_clan.find_one({"tag" : fix_tag(clan_tag)}, {"_id" : 0, "tag" : 1, "name" : 1, "members" : 1, "memberList" : 1, "level" : 1, "location" : 1})
     members = basic_clan.get("memberList")
-    legend_stats = await mongo.player_stats_db.find({"tag": {"$in" : [m.get("tag") for m in members]}}, projection={"name": 1, "townhall": 1, "legends": 1, "tag": 1, "_id" : 0}).to_list(length=None)
+    legend_stats = await mongo.player_stats.find({"tag": {"$in" : [m.get("tag") for m in members]}}, projection={"name": 1, "townhall": 1, "legends": 1, "tag": 1, "_id" : 0}).to_list(length=None)
 
     legend_stats_map = {l.get("tag") : l for l in legend_stats}
     new_member_list = []
@@ -40,7 +40,7 @@ async def legends_clan(clan_tag: str, date: str, *, mongo: MongoClient):
 @cache(expire=300)
 @linkd.ext.fastapi.inject
 async def legend_streaks(limit: int = Query(ge=1, default=50, le=500), *, mongo: MongoClient):
-    results = await mongo.player_stats_db.find({}, projection={"name": 1, "tag" : 1, "legends.streak": 1, "_id" : 0}).sort("legends.streak", -1).limit(limit).to_list(length=None)
+    results = await mongo.player_stats.find({}, projection={"name": 1, "tag" : 1, "legends.streak": 1, "_id" : 0}).sort("legends.streak", -1).limit(limit).to_list(length=None)
     for rank, r in enumerate(results, 1):
         r["rank"] = rank
     return {"items" : results}
