@@ -127,6 +127,21 @@ async def refresh_discord_access_token(
     """
     try:
         refresh_token = decrypt_data(encrypted_refresh_token)
+    except HTTPException as e:
+        # Token decryption failed - likely corrupted or wrong format
+        logger.error(f"Failed to decrypt Discord refresh token: {e.detail}")
+        raise HTTPException(
+            status_code=401,
+            detail="Stored Discord token is invalid. Please re-authenticate with Discord."
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error decrypting Discord refresh token: {str(e)}")
+        raise HTTPException(
+            status_code=401,
+            detail="Stored Discord token is invalid. Please re-authenticate with Discord."
+        )
+
+    try:
         async with rest.acquire() as client:
             auth = await client.refresh_access_token(
                 client=config.discord_client_id,
@@ -134,7 +149,14 @@ async def refresh_discord_access_token(
                 refresh_token=refresh_token,
             )
         return auth
+    except hikari.UnauthorizedError:
+        logger.warning("Discord refresh token was rejected by Discord API")
+        raise HTTPException(
+            status_code=401,
+            detail="Discord refresh token expired. Please re-authenticate with Discord."
+        )
     except Exception as e:
+        logger.error(f"Error refreshing Discord token: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error refreshing Discord token: {str(e)}")
 
 async def get_valid_discord_access_token(
@@ -629,8 +651,11 @@ async def store_discord_tokens(
         auth: Discord OAuth token
         mongo: MongoDB client
     """
+    if not auth.refresh_token:
+        raise HTTPException(status_code=500, detail="Discord did not provide a refresh token")
+
     encrypted_access = encrypt_data(auth.access_token)
-    encrypted_refresh = encrypt_data(str(auth.refresh_token))
+    encrypted_refresh = encrypt_data(auth.refresh_token)
 
     await mongo.auth_discord_tokens.update_one(
         {"user_id": user_id, "device_id": device_id, "device_name": device_name},
