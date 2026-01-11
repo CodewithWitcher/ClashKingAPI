@@ -10,7 +10,8 @@ from .models import (
     ReminderConfig,
     ServerRemindersResponse,
     CreateReminderRequest,
-    UpdateReminderRequest
+    UpdateReminderRequest,
+    validate_time_format
 )
 
 security = HTTPBearer()
@@ -247,6 +248,14 @@ async def update_reminder(
 
     if not existing:
         raise HTTPException(status_code=404, detail=REMINDER_NOT_FOUND)
+
+    # Validate time if being updated
+    if reminder.time is not None:
+        try:
+            reminder_type = existing.get("type", "War")
+            validate_time_format(reminder.time, reminder_type)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     # Build update document (match ClashKingBot schema)
     update_doc = {}
