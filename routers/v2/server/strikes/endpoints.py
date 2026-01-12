@@ -2,6 +2,7 @@ import secrets
 import string
 import pendulum as pend
 from datetime import timedelta
+import hikari
 from fastapi import HTTPException, APIRouter, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import linkd
@@ -9,10 +10,45 @@ import linkd
 from utils.database import MongoClient
 from utils.security import check_authentication
 from utils.utils import remove_id_fields, to_str
+from utils.config import Config
+from utils.cache_decorator import cache_endpoint
 from .models import StrikeRequest
 
 router = APIRouter(prefix="/v2/server", tags=["Server Strikes"], include_in_schema=True)
 security = HTTPBearer()
+
+
+@cache_endpoint(ttl=120, key_prefix="server_members_strikes")
+async def get_server_members_with_cache(rest: hikari.RESTApp, server_id: int, bot_token: str) -> dict:
+    """Fetch all members for a Discord server with caching.
+
+    Args:
+        rest: Hikari REST client
+        server_id: Discord server ID
+        bot_token: Bot authentication token
+
+    Returns:
+        Dictionary mapping user_id (str) to member object with username and avatar
+    """
+    members_dict = {}
+    if not bot_token:
+        return members_dict
+
+    try:
+        async with rest.acquire(token=bot_token, token_type=hikari.TokenType.BOT) as client:
+            async for member in client.fetch_members(server_id):
+                user_id = str(member.user.id)
+                display_name = member.nickname or member.user.username
+                avatar_url = str(member.user.make_avatar_url()) if member.user.avatar_hash else None
+
+                members_dict[user_id] = {
+                    'username': display_name,
+                    'avatar_url': avatar_url
+                }
+    except Exception as e:
+        print(f"Error fetching server members for {server_id}: {e}")
+
+    return members_dict
 
 
 def convert_strike_user_ids(strikes: list) -> list:
@@ -34,7 +70,9 @@ async def get_strikes(
     _user_id: str = None,
     _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient
+    mongo: MongoClient,
+    rest: hikari.RESTApp,
+    config: Config
 ):
     """
     Get all strikes for a server, optionally filtered by player tag.
@@ -66,6 +104,17 @@ async def get_strikes(
 
     strikes = await mongo.strike_list.find(query).sort("date_created", -1).to_list(length=None)
     strikes = convert_strike_user_ids(strikes)
+
+    # Get Discord members with caching (120s TTL)
+    members_dict = await get_server_members_with_cache(rest, server_id, config.bot_token)
+
+    # Enrich strikes with Discord user info
+    for strike in strikes:
+        if 'added_by' in strike:
+            user_id = str(strike['added_by'])
+            if user_id in members_dict:
+                strike['added_by_username'] = members_dict[user_id].get('username')
+                strike['added_by_avatar_url'] = members_dict[user_id].get('avatar_url')
 
     return remove_id_fields({"items": strikes, "count": len(strikes)})
 
