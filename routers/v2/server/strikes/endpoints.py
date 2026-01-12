@@ -3,13 +3,15 @@ import string
 import pendulum as pend
 from datetime import timedelta
 import hikari
+import coc
 from fastapi import HTTPException, APIRouter, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import linkd
 
 from utils.database import MongoClient
+from utils.custom_coc import CustomClashClient
 from utils.security import check_authentication
-from utils.utils import remove_id_fields, to_str
+from utils.utils import remove_id_fields, to_str, fix_tag
 from utils.config import Config
 from utils.cache_decorator import cache_endpoint
 from .models import StrikeRequest
@@ -108,15 +110,46 @@ async def get_strikes(
     # Get Discord members with caching (120s TTL)
     members_dict = await get_server_members_with_cache(rest, server_id, config.bot_token)
 
-    # Enrich strikes with Discord user info
+    # Get unique player tags
+    player_tags = list(set(strike.get('tag') for strike in strikes if strike.get('tag')))
+
+    # Fetch player names from database
+    player_names_dict = {}
+    if player_tags:
+        players_data = await mongo.player_stats.find(
+            {"tag": {"$in": player_tags}},
+            {"_id": 0, "tag": 1, "name": 1}
+        ).to_list(length=None)
+
+        player_names_dict = {player["tag"]: player.get("name") for player in players_data}
+
+    # Enrich strikes with Discord user info and player names
     for strike in strikes:
+        # Add Discord user info
         if 'added_by' in strike:
+            # Ensure added_by is a string (already converted by convert_strike_user_ids, but double-check)
+            strike['added_by'] = to_str(strike['added_by'])
             user_id = str(strike['added_by'])
             if user_id in members_dict:
                 strike['added_by_username'] = members_dict[user_id].get('username')
                 strike['added_by_avatar_url'] = members_dict[user_id].get('avatar_url')
 
-    return remove_id_fields({"items": strikes, "count": len(strikes)})
+        # Add player name from database
+        if 'tag' in strike:
+            player_tag = strike['tag']
+            if player_tag in player_names_dict:
+                strike['player_name'] = player_names_dict[player_tag]
+
+    # Ensure added_by remains as string after remove_id_fields (which uses json_util)
+    result = remove_id_fields({"items": strikes, "count": len(strikes)})
+    
+    # Re-convert added_by to string in case json_util converted it back to number
+    if 'items' in result:
+        for strike in result['items']:
+            if 'added_by' in strike:
+                strike['added_by'] = to_str(strike['added_by'])
+    
+    return result
 
 
 @router.post("/{server_id}/strikes/{player_tag}",
@@ -130,7 +163,8 @@ async def add_strike(
     _user_id: str = None,
     _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient
+    mongo: MongoClient,
+    coc_client: CustomClashClient
 ):
     """
     Add a strike to a player on a server.
@@ -142,10 +176,24 @@ async def add_strike(
         _user_id: Authenticated user ID (injected by decorator)
         _credentials: HTTP bearer credentials (injected by FastAPI)
         mongo: MongoDB client (injected by linkd)
+        coc_client: COC API client (injected by linkd)
 
     Returns:
         Created strike information
     """
+    # Normalize player tag to ensure it has # prefix
+    normalized_tag = fix_tag(player_tag)
+    
+    # Verify player exists via COC API and get player name
+    player_name = None
+    try:
+        player = await coc_client.get_player(normalized_tag)
+        player_name = player.name
+    except coc.NotFound:
+        raise HTTPException(status_code=404, detail=f"Player {normalized_tag} not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch player info: {str(e)}")
+
     now = pend.now(tz=pend.UTC)
     dt_string = now.strftime('%Y-%m-%d %H:%M:%S')
 
@@ -165,13 +213,13 @@ async def add_strike(
         rollover_date = now + timedelta(days=strike_data.rollover_days)
         rollover_timestamp = int(rollover_date.timestamp())
 
-    # Create strike entry
+    # Create strike entry - keep added_by as number in database, use normalized tag with #
     strike_entry = {
-        'tag': player_tag,
+        'tag': normalized_tag,  # Store tag with # prefix
         'date_created': dt_string,
         'reason': strike_data.reason,
         'server': server_id,
-        'added_by': strike_data.added_by,
+        'added_by': strike_data.added_by,  # Store as number (will be converted to string on retrieval)
         'strike_weight': strike_data.strike_weight,
         'rollover_date': rollover_timestamp,
         'strike_id': strike_id,
@@ -182,11 +230,11 @@ async def add_strike(
 
     await mongo.strike_list.insert_one(strike_entry)
 
-    # Get total strikes for this player
+    # Get total strikes for this player (use normalized tag)
     gte = int(pend.now(tz=pend.UTC).timestamp())
     total_strikes = await mongo.strike_list.find({
         '$and': [
-            {'tag': player_tag},
+            {'tag': normalized_tag},
             {'server': server_id},
             {
                 '$or': [
@@ -199,10 +247,13 @@ async def add_strike(
 
     total_weight = sum([s.get('strike_weight', 1) for s in total_strikes])
 
+    print(f"Strike {strike_id} added to player {normalized_tag} on server {server_id}")
+
     return {
         "status": "created",
         "strike_id": strike_id,
-        "player_tag": player_tag,
+        "player_tag": normalized_tag,  # Return normalized tag with #
+        "player_name": player_name,  # Include player name in response
         "server_id": server_id,
         "total_strikes": len(total_strikes),
         "total_weight": total_weight

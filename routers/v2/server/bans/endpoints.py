@@ -5,7 +5,7 @@ import hikari
 from fastapi import HTTPException, APIRouter, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from utils.utils import remove_id_fields, to_str
+from utils.utils import remove_id_fields, to_str, fix_tag
 from utils.database import MongoClient
 from utils.custom_coc import CustomClashClient
 from utils.security import check_authentication
@@ -85,12 +85,28 @@ async def get_bans(
     # Enrich bans with Discord user info
     for ban in bans:
         if 'added_by' in ban:
+            # Ensure added_by is a string (already converted by convert_ban_user_ids, but double-check)
+            ban['added_by'] = to_str(ban['added_by'])
             user_id = str(ban['added_by'])
             if user_id in members_dict:
                 ban['added_by_username'] = members_dict[user_id].get('username')
                 ban['added_by_avatar_url'] = members_dict[user_id].get('avatar_url')
 
-    return remove_id_fields({"items": bans, "count": len(bans)})
+    # Ensure added_by remains as string after remove_id_fields (which uses json_util)
+    result = remove_id_fields({"items": bans, "count": len(bans)})
+    
+    # Re-convert added_by to string in case json_util converted it back to number
+    if 'items' in result:
+        for ban in result['items']:
+            if 'added_by' in ban:
+                ban['added_by'] = to_str(ban['added_by'])
+            # Also handle edited_by
+            if 'edited_by' in ban and isinstance(ban['edited_by'], list):
+                for edit in ban['edited_by']:
+                    if 'user' in edit:
+                        edit['user'] = to_str(edit['user'])
+    
+    return result
 
 
 @router.post("/{server_id}/bans/{player_tag}",
@@ -108,22 +124,25 @@ async def add_ban(
     coc_client: CustomClashClient
 ):
     """Add or update a ban for a player in a specific server"""
+    # Normalize player tag to ensure it has # prefix
+    normalized_tag = fix_tag(player_tag)
+    
     # Verify player exists and get player name from COC API
     try:
-        player = await coc_client.get_player(player_tag)
+        player = await coc_client.get_player(normalized_tag)
         player_name = player.name
     except coc.NotFound:
-        raise HTTPException(status_code=404, detail=f"Player {player_tag} not found")
+        raise HTTPException(status_code=404, detail=f"Player {normalized_tag} not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch player info: {str(e)}")
 
-    find_ban = await mongo.banlist.find_one({'VillageTag': player_tag, 'server': server_id})
+    find_ban = await mongo.banlist.find_one({'VillageTag': normalized_tag, 'server': server_id})
 
     if find_ban:
-        print("Updating existing ban entry: ", player_tag, player_name)
+        print("Updating existing ban entry: ", normalized_tag, player_name)
         # Update existing ban
         await mongo.banlist.update_one(
-            {'VillageTag': player_tag, 'server': server_id},
+            {'VillageTag': normalized_tag, 'server': server_id},
             {
                 '$set': {'Notes': ban_data.reason},
                 '$push': {
@@ -136,12 +155,11 @@ async def add_ban(
                 },
             }
         )
-        return {"status": "updated", "player_tag": player_tag, "player_name": player_name, "server_id": server_id}
+        return {"status": "updated", "player_tag": normalized_tag, "player_name": player_name, "server_id": server_id}
     else:
-        print("Creating new ban entry: ", player_tag, player_name)
-        # Insert new ban
+        # Insert new ban - use normalized tag with #
         ban_entry = {
-            'VillageTag': player_tag,
+            'VillageTag': normalized_tag,  # Store tag with # prefix
             'VillageName': player_name,
             'DateCreated': pend.now("UTC").format("YYYY-MM-DD HH:mm:ss"),
             'Notes': ban_data.reason,
@@ -150,7 +168,7 @@ async def add_ban(
             'image': ban_data.image,
         }
         await mongo.banlist.insert_one(ban_entry)
-        return {"status": "created", "player_tag": player_tag, "player_name": player_name, "server_id": server_id}
+        return {"status": "created", "player_tag": normalized_tag, "player_name": player_name, "server_id": server_id}
 
 
 
@@ -167,10 +185,12 @@ async def remove_ban(
     mongo: MongoClient
 ):
     """Delete a ban for a player in a specific server"""
+    # Normalize player tag to ensure it has # prefix
+    normalized_tag = fix_tag(player_tag)
 
-    results = await mongo.banlist.find_one({'$and': [{'VillageTag': player_tag}, {'server': server_id}]})
+    results = await mongo.banlist.find_one({'$and': [{'VillageTag': normalized_tag}, {'server': server_id}]})
     if not results:
-        raise HTTPException(status_code=404, detail=f"Player {player_tag} is not banned on server {server_id}.")
+        raise HTTPException(status_code=404, detail=f"Player {normalized_tag} is not banned on server {server_id}.")
 
-    await mongo.banlist.find_one_and_delete({'$and': [{'VillageTag': player_tag}, {'server': server_id}]})
-    return {"status": "deleted", "player_tag": player_tag, "server_id": server_id}
+    await mongo.banlist.find_one_and_delete({'$and': [{'VillageTag': normalized_tag}, {'server': server_id}]})
+    return {"status": "deleted", "player_tag": normalized_tag, "server_id": server_id}
