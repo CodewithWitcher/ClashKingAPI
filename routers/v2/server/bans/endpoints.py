@@ -1,10 +1,12 @@
 import pendulum as pend
 import linkd
+import coc
 from fastapi import HTTPException, APIRouter, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from utils.utils import remove_id_fields, to_str
 from utils.database import MongoClient
+from utils.custom_coc import CustomClashClient
 from utils.security import check_authentication
 from .models import BanRequest
 
@@ -52,12 +54,23 @@ async def add_ban(
     _user_id: str = None,
     _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
-    mongo: MongoClient
+    mongo: MongoClient,
+    coc_client: CustomClashClient
 ):
     """Add or update a ban for a player in a specific server"""
+    # Verify player exists and get player name from COC API
+    try:
+        player = await coc_client.get_player(player_tag)
+        player_name = player.name
+    except coc.NotFound:
+        raise HTTPException(status_code=404, detail=f"Player {player_tag} not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch player info: {str(e)}")
+
     find_ban = await mongo.banlist.find_one({'VillageTag': player_tag, 'server': server_id})
 
     if find_ban:
+        print("Updating existing ban entry: ", player_tag, player_name)
         # Update existing ban
         await mongo.banlist.update_one(
             {'VillageTag': player_tag, 'server': server_id},
@@ -73,11 +86,13 @@ async def add_ban(
                 },
             }
         )
-        return {"status": "updated", "player_tag": player_tag, "server_id": server_id}
+        return {"status": "updated", "player_tag": player_tag, "player_name": player_name, "server_id": server_id}
     else:
+        print("Creating new ban entry: ", player_tag, player_name)
         # Insert new ban
         ban_entry = {
             'VillageTag': player_tag,
+            'VillageName': player_name,
             'DateCreated': pend.now("UTC").format("YYYY-MM-DD HH:mm:ss"),
             'Notes': ban_data.reason,
             'server': server_id,
@@ -85,7 +100,7 @@ async def add_ban(
             'image': ban_data.image,
         }
         await mongo.banlist.insert_one(ban_entry)
-        return {"status": "created", "player_tag": player_tag, "server_id": server_id}
+        return {"status": "created", "player_tag": player_tag, "player_name": player_name, "server_id": server_id}
 
 
 
