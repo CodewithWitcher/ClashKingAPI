@@ -251,7 +251,7 @@ dependencies = [
     { name = "aiocache" },
     { name = "aiohttp" },
     { name = "bcrypt" },
-    { name = "coc-py" },
+    { name = "clashy-py" },
     { name = "cryptography" },
     { name = "expiring-dict" },
     { name = "fastapi" },
@@ -279,7 +279,7 @@ dependencies = [
     { name = "sentry-sdk" },
     { name = "slowapi" },
     { name = "uvicorn" },
-    { name = "uvloop" },
+    { name = "uvloop", marker = "sys_platform != 'win32'" },
 ]
 
 [package.optional-dependencies]
@@ -296,7 +296,7 @@ requires-dist = [
     { name = "aiohttp" },
     { name = "bcrypt" },
     { name = "black", marker = "extra == 'dev'" },
-    { name = "coc-py", git = "https://github.com/mathsman5133/coc.py.git?rev=march-update" },
+    { name = "clashy-py", specifier = ">=25.12.5" },
     { name = "cryptography" },
     { name = "expiring-dict" },
     { name = "fastapi" },
@@ -305,7 +305,7 @@ requires-dist = [
     { name = "flake8", marker = "extra == 'dev'" },
     { name = "gunicorn" },
     { name = "hashids" },
-    { name = "hikari", git = "https://github.com/hikari-py/hikari.git" },
+    { name = "hikari", git = "https://github.com/hikari-py/hikari.git?rev=2.5.0" },
     { name = "isort", marker = "extra == 'dev'" },
     { name = "linkd" },
     { name = "matplotlib" },
@@ -327,9 +327,22 @@ requires-dist = [
     { name = "sentry-sdk" },
     { name = "slowapi" },
     { name = "uvicorn" },
-    { name = "uvloop" },
+    { name = "uvloop", marker = "sys_platform != 'win32'" },
 ]
 provides-extras = ["dev"]
+
+[[package]]
+name = "clashy-py"
+version = "25.12.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "orjson" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b8/aa/ac4745c3dc2045bb6a5f3e4b5824ec030237c1f6857e81f4a6a8167daf78/clashy_py-25.12.5.tar.gz", hash = "sha256:e9aafbdf7044f259cc455670988c57dbea33ac4b52c9f8992c121954b21881f4", size = 1083303, upload-time = "2025-12-20T22:57:17.234Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0d/8a/28f7cfff4bfa968c28c6221f5f5f0ba39eede0455b6f7b8fa35b9e35140a/clashy_py-25.12.5-py3-none-any.whl", hash = "sha256:96b9d1bd67e7dd67713115c2c65901e7a62c13ae32a8f6c067ebb0b4829e570e", size = 1122937, upload-time = "2025-12-20T22:57:15.424Z" },
+]
 
 [[package]]
 name = "click"
@@ -341,15 +354,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/46/61/de6cd827efad202d7057d93e0fed9294b96952e188f7384832791c7b2254/click-8.3.0.tar.gz", hash = "sha256:e7b8232224eba16f4ebe410c25ced9f7875cb5f3263ffc93cc3e8da705e229c4", size = 276943, upload-time = "2025-09-18T17:32:23.696Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/db/d3/9dcc0f5797f070ec8edf30fbadfb200e71d9db6b84d211e3b2085a7589a0/click-8.3.0-py3-none-any.whl", hash = "sha256:9b9f285302c6e3064f4330c05f05b81945b2a39544279343e6e7c5f27a9baddc", size = 107295, upload-time = "2025-09-18T17:32:22.42Z" },
-]
-
-[[package]]
-name = "coc-py"
-version = "3.10.0"
-source = { git = "https://github.com/mathsman5133/coc.py.git?rev=march-update#c15b25221be1aaa96ba7c405a014f15ed08fdf37" }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "orjson" },
 ]
 
 [[package]]
@@ -679,8 +683,8 @@ wheels = [
 
 [[package]]
 name = "hikari"
-version = "2.4.2.dev0"
-source = { git = "https://github.com/hikari-py/hikari.git#7d34603c29bb331561d6029a12565324a47c0de6" }
+version = "2.5.0"
+source = { git = "https://github.com/hikari-py/hikari.git?rev=2.5.0#2a605db94a2a3264325027df507c20f7b07d1b4e" }
 dependencies = [
     { name = "aiohttp" },
     { name = "attrs" },

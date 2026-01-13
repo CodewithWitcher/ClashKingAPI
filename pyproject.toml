@@ -8,7 +8,6 @@ dependencies = [
     "aiocache",
     "aiohttp",
     "bcrypt",
-    "coc-py @ git+https://github.com/mathsman5133/coc.py.git@march-update",
     "cryptography",
     "expiring-dict",
     "fastapi",
@@ -37,6 +36,7 @@ dependencies = [
     "uvicorn",
     "fastapi-cache2>=0.2.2",
     "psutil>=7.1.3",
+    "clashy-py>=25.12.5",
 ]
 
 [project.optional-dependencies]

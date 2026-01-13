@@ -25,6 +25,7 @@ from routers.v2.capital.endpoints import router as capital_router
 from routers.v2.activity.endpoints import router as activity_router
 from routers.v2.legends.endpoints import router as legends_router
 from routers.v2.mobile.endpoints import router as mobile_router
+from routers.v2.static_data.endpoints import router as static_data_router
 
 # V1 Routers
 from routers.v1.clan import router as v1_clan_router
@@ -62,6 +63,7 @@ def define_app(app: FastAPI):
         activity_router,
         legends_router,
         mobile_router,
+        static_data_router,
     ]
 
     # V1 Routers
