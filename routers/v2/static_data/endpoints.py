@@ -7,6 +7,7 @@ heroes, pets, equipment, and other game elements from the clashy.py library.
 
 import json
 import os
+import copy
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Path
 from fastapi_cache.decorator import cache
@@ -27,8 +28,56 @@ def load_static_data() -> dict:
     except Exception as e:
         raise RuntimeError(f"Failed to load static data: {str(e)}")
 
-# Cache the static data in memory
+
+def load_translations() -> dict:
+    """Load translations from clashy.py's translations.json file."""
+    try:
+        import coc
+        coc_path = os.path.dirname(coc.__file__)
+        translations_path = os.path.join(coc_path, "static", "translations.json")
+
+        with open(translations_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        raise RuntimeError(f"Failed to load translations: {str(e)}")
+
+
+def translate_items(items: list, locale: str, translations: dict) -> list:
+    """
+    Translate item names based on locale.
+
+    Args:
+        items: List of items with TID.name field
+        locale: Locale code (e.g., 'FR', 'DE', 'ES')
+        translations: Translations dictionary
+
+    Returns:
+        List of items with translated names
+    """
+    locale_upper = locale.upper()
+    translated_items = []
+
+    for item in items:
+        # Deep copy to avoid modifying original data
+        item_copy = copy.deepcopy(item)
+        tid_name = item_copy.get("TID", {}).get("name")
+
+        if tid_name and tid_name in translations:
+            translation = translations[tid_name].get(locale_upper)
+            if translation:
+                item_copy["name"] = translation
+
+        translated_items.append(item_copy)
+
+    return translated_items
+
+
+# Cache the static data and translations in memory
 STATIC_DATA = load_static_data()
+TRANSLATIONS = load_translations()
+
+# Available locales
+AVAILABLE_LOCALES = ["EN", "AR", "CN", "CNT", "DE", "ES", "FA", "FI", "FR", "ID", "IT", "JP", "KR", "MS", "NL", "NO", "PL", "PT", "RU", "TH", "TR", "VI"]
 
 # Available categories with their metadata
 CATEGORIES = {
@@ -79,10 +128,11 @@ async def get_category_items(
     name: Optional[str] = Query(None, description="Filter by name (partial match, case-insensitive)"),
     village: Optional[str] = Query(None, description="Filter by village type (home/builder)"),
     type: Optional[str] = Query(None, description="Filter by type (for buildings)"),
-    category_filter: Optional[str] = Query(None, description="Filter by category (for troops)", alias="category")
+    category_filter: Optional[str] = Query(None, description="Filter by category (for troops)", alias="category"),
+    locale: Optional[str] = Query(None, description="Locale for translations (e.g., FR, DE, ES)")
 ):
     """
-    Get all items from a specific category with optional filtering.
+    Get all items from a specific category with optional filtering and translation.
 
     Args:
         category: Category name (buildings, troops, spells, heroes, pets, etc.)
@@ -90,6 +140,7 @@ async def get_category_items(
         village: Optional filter by village type (home/builder)
         type: Optional filter by type (for buildings)
         category_filter: Optional filter by category (for troops)
+        locale: Optional locale for translations (e.g., FR, DE, ES)
 
     Returns:
         List of items with their complete data
@@ -98,6 +149,7 @@ async def get_category_items(
         GET /v2/static/buildings?village=home
         GET /v2/static/troops?name=dragon
         GET /v2/static/heroes
+        GET /v2/static/league_tiers?locale=FR
     """
     # Validate category
     if category not in CATEGORIES:
@@ -106,8 +158,19 @@ async def get_category_items(
             detail=f"Category '{category}' not found. Available categories: {', '.join(CATEGORIES.keys())}"
         )
 
+    # Validate locale if provided
+    if locale and locale.upper() not in AVAILABLE_LOCALES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid locale '{locale}'. Available locales: {', '.join(AVAILABLE_LOCALES)}"
+        )
+
     items = STATIC_DATA.get(category, [])
     category_meta = CATEGORIES[category]
+
+    # Apply translation if locale is provided
+    if locale:
+        items = translate_items(items, locale, TRANSLATIONS)
 
     # Apply filters
     if name:
@@ -131,7 +194,8 @@ async def get_category_names(
     category: str = Path(..., description="Category name (e.g., buildings, troops, heroes)"),
     village: Optional[str] = Query(None, description="Filter by village type (home/builder)"),
     type: Optional[str] = Query(None, description="Filter by type (for buildings)"),
-    category_filter: Optional[str] = Query(None, description="Filter by category (for troops)", alias="category")
+    category_filter: Optional[str] = Query(None, description="Filter by category (for troops)", alias="category"),
+    locale: Optional[str] = Query(None, description="Locale for translations (e.g., FR, DE, ES)")
 ):
     """
     Get simplified list with only names from a category.
@@ -142,6 +206,7 @@ async def get_category_names(
         village: Optional filter by village type (home/builder)
         type: Optional filter by type (for buildings)
         category_filter: Optional filter by category (for troops)
+        locale: Optional locale for translations (e.g., FR, DE, ES)
 
     Returns:
         Array of item names
@@ -152,6 +217,9 @@ async def get_category_names(
 
         GET /v2/static/troops/names
         Returns: ["Barbarian", "Archer", "Giant", ...]
+
+        GET /v2/static/league_tiers/names?locale=FR
+        Returns: ["Non classé", "Ligue Squelette 1", ...]
     """
     # Validate category
     if category not in CATEGORIES:
@@ -160,8 +228,19 @@ async def get_category_names(
             detail=f"Category '{category}' not found. Available categories: {', '.join(CATEGORIES.keys())}"
         )
 
+    # Validate locale if provided
+    if locale and locale.upper() not in AVAILABLE_LOCALES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid locale '{locale}'. Available locales: {', '.join(AVAILABLE_LOCALES)}"
+        )
+
     items = STATIC_DATA.get(category, [])
     category_meta = CATEGORIES[category]
+
+    # Apply translation if locale is provided
+    if locale:
+        items = translate_items(items, locale, TRANSLATIONS)
 
     # Apply filters
     if village and category_meta.get("supports_village"):

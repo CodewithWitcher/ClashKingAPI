@@ -36,18 +36,71 @@ router = APIRouter(prefix="/v2/server", tags=["Role Management"], include_in_sch
 SERVER_NOT_FOUND = "Server not found"
 
 
-def load_league_tiers() -> set:
-    """Load league tier names from static data for validation."""
+def load_league_data() -> tuple[dict, dict]:
+    """
+    Load league tier names and translations for validation.
+
+    Returns:
+        Tuple of (translations_dict, tid_to_english_name_map)
+    """
     import coc
     coc_path = os.path.dirname(coc.__file__)
+
+    # Load static data
     static_data_path = os.path.join(coc_path, "static", "static_data.json")
-
     with open(static_data_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+        static_data = json.load(f)
 
-    # Get all league tier names
-    league_tiers = data.get("league_tiers", [])
-    return {tier.get("name") for tier in league_tiers if tier.get("name")}
+    # Load translations
+    translations_path = os.path.join(coc_path, "static", "translations.json")
+    with open(translations_path, 'r', encoding='utf-8') as f:
+        translations = json.load(f)
+
+    # Build TID -> English name mapping
+    tid_to_english = {}
+    league_tiers = static_data.get("league_tiers", [])
+    for tier in league_tiers:
+        tid = tier.get("TID", {}).get("name")
+        if tid and tid in translations:
+            english_name = translations[tid].get("EN")
+            if english_name:
+                tid_to_english[tid] = english_name
+
+    return translations, tid_to_english
+
+
+def convert_to_english_league_name(name: str, translations: dict, tid_to_english: dict) -> str:
+    """
+    Convert a league name in any language to its English equivalent.
+
+    Args:
+        name: League name in any language (e.g., "Ligue Légende", "Legend League")
+        translations: Full translations dictionary
+        tid_to_english: Mapping from TID to English name
+
+    Returns:
+        English league name
+
+    Raises:
+        HTTPException: If the league name is not found in any language
+    """
+    # Check if it's already in English
+    if name in tid_to_english.values():
+        return name
+
+    # Search through all translations to find the TID
+    for tid, lang_map in translations.items():
+        if name in lang_map.values():
+            # Found it! Return the English name
+            english_name = tid_to_english.get(tid)
+            if english_name:
+                return english_name
+
+    # Not found in any language
+    raise HTTPException(
+        status_code=400,
+        detail=f"Invalid league type: '{name}'. Must be a valid Clash of Clans league in any supported language."
+    )
 
 
 def normalize_league_name(name: str) -> str:
@@ -59,17 +112,8 @@ def normalize_league_name(name: str) -> str:
     return name.lower().replace(" ", "_")
 
 
-def validate_league_type(league_type: str, valid_leagues: set) -> None:
-    """Validate that a league type exists in the game data."""
-    if league_type not in valid_leagues:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid league type: '{league_type}'. Must be one of the valid Clash of Clans leagues."
-        )
-
-
-# Load valid leagues at startup
-VALID_LEAGUES = load_league_tiers()
+# Load league data at startup
+LEAGUE_TRANSLATIONS, TID_TO_ENGLISH = load_league_data()
 
 
 # Mapping of role types to Pydantic models
@@ -288,11 +332,12 @@ async def create_role(
 
     # Validate and normalize league types
     if role_type == "league":
-        validate_league_type(role_data.type, VALID_LEAGUES)
+        # Convert from any language to English (validates in the process)
+        english_name = convert_to_english_league_name(role_data.type, LEAGUE_TRANSLATIONS, TID_TO_ENGLISH)
         # Normalize to snake_case for database storage
-        role_data.type = normalize_league_name(role_data.type)
+        role_data.type = normalize_league_name(english_name)
     elif role_type == "builder_league":
-        # TODO: Add builder league validation if needed
+        # TODO: Add builder league validation and translation if needed
         role_data.type = normalize_league_name(role_data.type)
 
     role_doc = role_data.model_dump()
