@@ -25,6 +25,8 @@ from .models import (
 from typing import Union
 import linkd
 import hikari
+import json
+import os
 
 security = HTTPBearer()
 config = Config()
@@ -32,6 +34,42 @@ router = APIRouter(prefix="/v2/server", tags=["Role Management"], include_in_sch
 
 # Constants
 SERVER_NOT_FOUND = "Server not found"
+
+
+def load_league_tiers() -> set:
+    """Load league tier names from static data for validation."""
+    import coc
+    coc_path = os.path.dirname(coc.__file__)
+    static_data_path = os.path.join(coc_path, "static", "static_data.json")
+
+    with open(static_data_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    # Get all league tier names
+    league_tiers = data.get("league_tiers", [])
+    return {tier.get("name") for tier in league_tiers if tier.get("name")}
+
+
+def normalize_league_name(name: str) -> str:
+    """
+    Normalize league name to snake_case for database storage.
+    Example: "Legend League" -> "legend_league"
+             "Titan League I" -> "titan_league_i"
+    """
+    return name.lower().replace(" ", "_")
+
+
+def validate_league_type(league_type: str, valid_leagues: set) -> None:
+    """Validate that a league type exists in the game data."""
+    if league_type not in valid_leagues:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid league type: '{league_type}'. Must be one of the valid Clash of Clans leagues."
+        )
+
+
+# Load valid leagues at startup
+VALID_LEAGUES = load_league_tiers()
 
 
 # Mapping of role types to Pydantic models
@@ -247,6 +285,15 @@ async def create_role(
     server = await mongo.server_db.find_one({"server": server_id})
     if not server:
         raise HTTPException(status_code=404, detail=SERVER_NOT_FOUND)
+
+    # Validate and normalize league types
+    if role_type == "league":
+        validate_league_type(role_data.type, VALID_LEAGUES)
+        # Normalize to snake_case for database storage
+        role_data.type = normalize_league_name(role_data.type)
+    elif role_type == "builder_league":
+        # TODO: Add builder league validation if needed
+        role_data.type = normalize_league_name(role_data.type)
 
     role_doc = role_data.model_dump()
     role_doc["server"] = server_id
