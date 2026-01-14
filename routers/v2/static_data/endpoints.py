@@ -100,6 +100,12 @@ CATEGORIES = {
     "achievements": {"id_field": "_id"},
 }
 
+# Categories that have items with levels (eligible for maxlevel endpoint)
+ELIGIBLE_CATEGORIES_FOR_LEVELS = {
+    "buildings", "traps", "troops", "guardians", "spells", 
+    "heroes", "pets", "equipment", "helpers", "achievements"
+}
+
 
 @router.get("/categories", name="Get all available static data categories")
 @cache(expire=3600)
@@ -256,24 +262,25 @@ async def get_category_names(
     return [item.get("name") for item in items]
 
 
-@router.get("/{category}/{item_id}", name="Get specific item by ID from a category")
+@router.get("/{category}/{item_id}", name="Get specific item by ID or name from a category")
 @cache(expire=3600)
 async def get_category_item_by_id(
     category: str = Path(..., description="Category name (e.g., buildings, troops, heroes)"),
-    item_id: int = Path(..., description="Item ID")
+    item_id: str = Path(..., description="Item ID (integer) or name (string)")
 ):
     """
-    Get a specific item by its ID from a category.
+    Get a specific item by its ID or name from a category.
 
     Args:
         category: Category name (buildings, troops, spells, heroes, pets, etc.)
-        item_id: The unique ID of the item
+        item_id: The unique ID of the item (integer) or the name of the item (string, case-insensitive)
 
     Returns:
         Complete item data with all levels and stats
 
     Example:
-        GET /v2/static/buildings/1000000
+        GET /v2/static/buildings/1000001
+        GET /v2/static/buildings/Town%20Hall
         GET /v2/static/heroes/28000000
         GET /v2/static/troops/4000000
     """
@@ -288,13 +295,142 @@ async def get_category_item_by_id(
     category_meta = CATEGORIES[category]
     id_field = category_meta["id_field"]
 
-    # Find item by ID
-    item = next((i for i in items if i.get(id_field) == item_id), None)
+    # Try to parse as integer first (ID lookup)
+    try:
+        item_id_int = int(item_id)
+        item = next((i for i in items if i.get(id_field) == item_id_int), None)
+        if item:
+            return item
+    except ValueError:
+        # Not an integer, treat as name
+        pass
+
+    # If we reach here, either parsing as int failed or item not found by ID
+    # Try to find by name (case-insensitive)
+    item = next((i for i in items if i.get("name", "").lower() == item_id.lower()), None)
 
     if not item:
         raise HTTPException(
             status_code=404,
-            detail=f"Item with ID {item_id} not found in category '{category}'"
+            detail=f"Item with ID or name '{item_id}' not found in category '{category}'"
         )
 
     return item
+
+
+def find_item_by_id_or_name(category: str, item_id: str) -> dict:
+    """
+    Helper function to find an item by ID or name in a category.
+    
+    Args:
+        category: Category name
+        item_id: Item ID (integer as string) or name (string)
+    
+    Returns:
+        Item dictionary if found
+    
+    Raises:
+        HTTPException: If category not found or item not found
+    """
+    # Validate category
+    if category not in CATEGORIES:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Category '{category}' not found. Available categories: {', '.join(CATEGORIES.keys())}"
+        )
+
+    items = STATIC_DATA.get(category, [])
+    category_meta = CATEGORIES[category]
+    id_field = category_meta["id_field"]
+
+    # Try to parse as integer first (ID lookup)
+    try:
+        item_id_int = int(item_id)
+        item = next((i for i in items if i.get(id_field) == item_id_int), None)
+        if item:
+            return item
+    except ValueError:
+        # Not an integer, treat as name
+        pass
+
+    # If we reach here, either parsing as int failed or item not found by ID
+    # Try to find by name (case-insensitive)
+    item = next((i for i in items if i.get("name", "").lower() == item_id.lower()), None)
+
+    if not item:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Item with ID or name '{item_id}' not found in category '{category}'"
+        )
+
+    return item
+
+
+@router.get("/{category}/{item_id}/maxlevel", name="Get maximum level of an item")
+@cache(expire=3600)
+async def get_item_max_level(
+    category: str = Path(..., description="Category name (e.g., buildings, troops, heroes)"),
+    item_id: str = Path(..., description="Item ID (integer) or name (string)")
+):
+    """
+    Get the maximum level of a specific item from a category.
+    Only works for categories that have items with levels.
+
+    Args:
+        category: Category name (must be one of: buildings, traps, troops, guardians, spells, heroes, pets, equipment, helpers, achievements)
+        item_id: The unique ID of the item (integer) or the name of the item (string, case-insensitive)
+
+    Returns:
+        Object with item name and maximum level
+
+    Example:
+        GET /v2/static/buildings/1000001/maxlevel
+        Returns: {"name": "Town Hall", "max_level": 17}
+
+        GET /v2/static/buildings/Town%20Hall/maxlevel
+        Returns: {"name": "Town Hall", "max_level": 17}
+
+        GET /v2/static/heroes/Barbarian%20King/maxlevel
+        Returns: {"name": "Barbarian King", "max_level": 90}
+    """
+    # Check if category is eligible
+    if category not in ELIGIBLE_CATEGORIES_FOR_LEVELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Category '{category}' does not support levels. Eligible categories: {', '.join(sorted(ELIGIBLE_CATEGORIES_FOR_LEVELS))}"
+        )
+
+    # Find the item
+    item = find_item_by_id_or_name(category, item_id)
+
+    # Extract levels
+    levels = item.get("levels", [])
+    if not levels:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Item '{item.get('name', item_id)}' in category '{category}' has no levels defined"
+        )
+
+    # Extract level numbers from the levels array
+    level_numbers = []
+    for level in levels:
+        if isinstance(level, dict):
+            # If level is a dict, try to get the "level" field
+            if "level" in level:
+                level_numbers.append(level["level"])
+        elif isinstance(level, (int, float)):
+            # If level is directly a number
+            level_numbers.append(int(level))
+
+    if not level_numbers:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Could not extract level numbers from item '{item.get('name', item_id)}' in category '{category}'"
+        )
+
+    max_level = max(level_numbers)
+
+    return {
+        "name": item.get("name"),
+        "max_level": max_level
+    }
