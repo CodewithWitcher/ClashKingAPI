@@ -81,6 +81,10 @@ class MongoClient(AsyncMongoClient):
     builder_league_roles: AsyncCollection
     achievement_roles: AsyncCollection
     family_roles: AsyncCollection
+    general_family_roles: AsyncCollection
+    not_family_roles: AsyncCollection
+    family_exclusive_roles: AsyncCollection
+    ignored_roles: AsyncCollection
     bot_settings: AsyncCollection
     ticketing: AsyncCollection
     embeds: AsyncCollection
@@ -171,6 +175,10 @@ class MongoClient(AsyncMongoClient):
         self.builder_league_roles = self.__bot_usafam.get_collection('builderleagueroles')
         self.achievement_roles = self.__bot_usafam.get_collection('achievementroles')
         self.family_roles = self.__bot_usafam.get_collection('family_roles')
+        self.general_family_roles = self.__bot_usafam.get_collection('generalrole')
+        self.not_family_roles = self.__bot_usafam.get_collection('linkrole')
+        self.family_exclusive_roles = self.__bot_usafam.get_collection('familyexclusiveroles')
+        self.ignored_roles = self.__bot_usafam.get_collection('evalignore')
         self.ticketing = self.__bot_usafam.get_collection('tickets')
         self.embeds = self.__bot_usafam.get_collection('custom_embeds')
         self.open_tickets = self.__bot_usafam.get_collection('open_tickets')

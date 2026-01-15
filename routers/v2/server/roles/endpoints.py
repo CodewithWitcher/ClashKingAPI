@@ -146,11 +146,13 @@ def build_duplicate_query(server_id: int, role_type: str, role_data) -> dict:
     query = {"server": server_id}
 
     if role_type == "townhall":
-        query["th"] = role_data.th
+        # MongoDB stores as "th10" string format
+        query["th"] = f"th{role_data.th}"
     elif role_type in ["league", "builder_league"]:
         query["type"] = role_data.type
     elif role_type == "builderhall":
-        query["bh"] = role_data.bh
+        # MongoDB stores as "bh3" string format
+        query["bh"] = f"bh{role_data.bh}"
     elif role_type == "achievement":
         query["type"] = role_data.type
         query["season"] = role_data.season
@@ -337,11 +339,20 @@ async def create_role(
         # Normalize to snake_case for database storage
         role_data.type = normalize_league_name(english_name)
     elif role_type == "builder_league":
-        # TODO: Add builder league validation and translation if needed
+        # TODO: Add builder league validation and translation once we have it
         role_data.type = normalize_league_name(role_data.type)
 
     role_doc = role_data.model_dump()
-    role_doc["server"] = server_id
+
+    # Status roles don't need server field (they're stored in server_db subdocument)
+    if role_type != "status":
+        role_doc["server"] = server_id
+
+    # Convert townhall and builderhall levels to string format for MongoDB
+    if role_type == "townhall" and "th" in role_doc:
+        role_doc["th"] = f"th{role_doc['th']}"
+    elif role_type == "builderhall" and "bh" in role_doc:
+        role_doc["bh"] = f"bh{role_doc['bh']}"
 
     # Handle status roles differently (stored in server_db)
     if role_type == "status":

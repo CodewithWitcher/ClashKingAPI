@@ -17,6 +17,7 @@ from routers.v2.server.autoboards.endpoints import router as server_autoboards_r
 from routers.v2.server.links.endpoints import router as server_links_router
 from routers.v2.server.clans.endpoints import router as server_clans_router
 from routers.v2.server.roles.endpoints import router as server_roles_router
+from routers.v2.server.family_roles.endpoints import router as server_family_roles_router
 from routers.v2.server.guilds.endpoints import router as guilds_router, guild_router
 from routers.v2.server.strikes.endpoints import router as server_strikes_router
 from routers.v2.server.bans.endpoints import router as server_bans_router
@@ -56,6 +57,7 @@ def define_app(app: FastAPI):
         server_autoboards_router,
         server_clans_router,
         server_roles_router,
+        server_family_roles_router,
         server_strikes_router,
         server_bans_router,
         server_countdowns_router,
