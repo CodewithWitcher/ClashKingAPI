@@ -294,6 +294,28 @@ class DiscordAPI:
         self._emojis_cache[server_id] = emojis
         return emojis
 
+    async def get_webhook(self, webhook_id: int) -> Optional[Dict]:
+        """
+        Retrieve Discord webhook information by webhook ID.
+        This includes the channel_id where the webhook is located.
+
+        Args:
+            webhook_id: Discord webhook ID
+
+        Returns:
+            Dict containing webhook information including channel_id, or None if not found
+
+        Raises:
+            aiohttp.ClientError: If Discord API request fails
+        """
+        try:
+            url = f'https://discord.com/api/v10/webhooks/{webhook_id}'
+            webhook_data = await self._make_request(url)
+            return webhook_data
+        except aiohttp.ClientError:
+            # Webhook might not exist or be inaccessible
+            return None
+
     def clear_cache(self, server_id: Optional[int] = None):
         """
         Clear cached data for a specific server or all servers.

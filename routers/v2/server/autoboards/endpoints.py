@@ -7,6 +7,7 @@ from bson import ObjectId
 from utils.database import MongoClient
 from utils.security import check_authentication
 from utils.sentry_utils import capture_endpoint_errors
+from utils.discord_api import discord_api
 from .models import (
     AutoBoardConfig,
     ServerAutoBoardsResponse,
@@ -61,6 +62,21 @@ async def get_server_autoboards(
         if ":" in button_id:
             board_type = button_id.split(":")[0]
 
+        # Get channel_id from database or fetch from webhook
+        channel_id = board.get("channel_id")
+        if not channel_id and board.get("webhook_id"):
+            # Try to get channel_id from webhook via Discord API
+            try:
+                webhook_id = board.get("webhook_id")
+                if webhook_id:
+                    webhook_info = await discord_api.get_webhook(int(webhook_id))
+                    if webhook_info and webhook_info.get("channel_id"):
+                        channel_id = webhook_info.get("channel_id")
+            except Exception as e:
+                # If webhook fetch fails, continue without channel_id
+                # This can happen if webhook was deleted or is inaccessible
+                pass
+
         autoboard_config = AutoBoardConfig(
             id=str(board.get("_id")),
             type=board.get("type", "refresh"),
@@ -68,7 +84,7 @@ async def get_server_autoboards(
             button_id=button_id,
             webhook_id=str(board.get("webhook_id")) if board.get("webhook_id") else "",
             thread_id=str(board.get("thread_id")) if board.get("thread_id") else None,
-            channel_id=str(board.get("channel_id")) if board.get("channel_id") else None,
+            channel_id=str(channel_id) if channel_id else None,
             days=board.get("days", []),
             locale=board.get("locale", "en-US"),
             created_at=str(board.get("created_at")) if board.get("created_at") else None
