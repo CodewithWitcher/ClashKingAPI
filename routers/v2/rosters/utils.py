@@ -75,6 +75,14 @@ def count_player_attacks(war_data: dict, player_tag: str) -> tuple[int, int]:
 
 async def calculate_player_hitrate(player_tag: str, days: int = 30, mongo: MongoClient = None) -> float:
     """Calculate player's hitrate over the last X days."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Debug: Check if mongo is None
+    if mongo is None:
+        logger.warning(f"[HITRATE DEBUG] mongo is None for player {player_tag}")
+        return 0.0
+
     # Calculate time range
     end_time = pend.now(tz=pend.UTC)
     start_time = end_time.subtract(days=days)
@@ -83,6 +91,8 @@ async def calculate_player_hitrate(player_tag: str, days: int = 30, mongo: Mongo
     end_time_str = end_time.strftime('%Y%m%dT%H%M%S.000Z')
 
     player_tag = correct_tag(player_tag)
+
+    logger.info(f"[HITRATE DEBUG] Calculating hitrate for {player_tag}, range: {start_time_str} to {end_time_str}")
 
     pipeline = [
         {
@@ -104,9 +114,12 @@ async def calculate_player_hitrate(player_tag: str, days: int = 30, mongo: Mongo
     ]
 
     try:
-        wars_docs = await mongo.clan_wars.aggregate(
+        cursor = await mongo.clan_wars.aggregate(
             pipeline, allowDiskUse=True
-        ).to_list(length=None)
+        )
+        wars_docs = await cursor.to_list(length=None)
+
+        logger.info(f"[HITRATE DEBUG] Found {len(wars_docs)} wars for player {player_tag}")
 
         total_attacks = 0
         three_star_attacks = 0
@@ -117,11 +130,16 @@ async def calculate_player_hitrate(player_tag: str, days: int = 30, mongo: Mongo
             total_attacks += attacks
             three_star_attacks += three_stars
 
+        logger.info(f"[HITRATE DEBUG] Player {player_tag}: {three_star_attacks}/{total_attacks} attacks")
+
         if total_attacks == 0:
             return 0.0
 
-        return round((three_star_attacks / total_attacks) * 100, 2)
-    except (KeyError, TypeError, ValueError):
+        hitrate = round((three_star_attacks / total_attacks) * 100, 2)
+        logger.info(f"[HITRATE DEBUG] Player {player_tag} hitrate: {hitrate}%")
+        return hitrate
+    except Exception as e:
+        logger.error(f"[HITRATE DEBUG] Exception for {player_tag}: {type(e).__name__}: {e}")
         return 0.0
 
 
@@ -240,7 +258,7 @@ async def check_user_account_limit(
 
 
 async def refresh_member_data(
-    member: dict, coc_client: coc.Client
+    member: dict, coc_client: coc.Client, mongo: MongoClient = None
 ) -> tuple[dict, str]:
     """
     Refresh a single member's data from CoC API.
@@ -259,8 +277,8 @@ async def refresh_member_data(
         current_clan_tag = player.clan.tag if player.clan else '#'
 
         # Calculate stats for enhanced member data
-        hitrate = await calculate_player_hitrate(player.tag)
-        last_online = await get_player_last_online(player.tag)
+        hitrate = await calculate_player_hitrate(player.tag, mongo=mongo)
+        last_online = await get_player_last_online(player.tag, mongo=mongo)
 
         # Get league name
         current_league = player.league.name if player.league else 'Unranked'
@@ -521,6 +539,7 @@ async def process_player_additions(
     payload_add: list,
     tag_to_user_id: dict,
     user_to_count: dict,
+    mongo: MongoClient = None,
 ) -> tuple[list, int, int]:
     """
     Process player additions and return added members list with counts.
@@ -560,8 +579,8 @@ async def process_player_additions(
         signup_group = original_member.signup_group if original_member else None
 
         # Fetch player stats
-        hitrate = await calculate_player_hitrate(player.tag)
-        last_online = await get_player_last_online(player.tag)
+        hitrate = await calculate_player_hitrate(player.tag, mongo=mongo)
+        last_online = await get_player_last_online(player.tag, mongo=mongo)
 
         # Build member data
         member_data = build_member_data(
@@ -758,7 +777,7 @@ async def refresh_single_roster(roster: dict, mongo, coc_client) -> dict:
     removed_count = 0
 
     for member in members:
-        updated_member, action = await refresh_member_data(member, coc_client)
+        updated_member, action = await refresh_member_data(member, coc_client, mongo=mongo)
 
         if action == 'remove':
             removed_count += 1

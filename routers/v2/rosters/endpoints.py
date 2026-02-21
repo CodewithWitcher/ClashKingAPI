@@ -1157,6 +1157,7 @@ async def manage_roster_members(
                 payload.add,
                 tag_to_user_id,
                 user_to_count,
+                mongo=mongo,
             )
 
             # Bulk add members to roster

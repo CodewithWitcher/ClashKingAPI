@@ -262,11 +262,11 @@ async def get_category_names(
     return [item.get("name") for item in items]
 
 
-@router.get("/{category}/{item_id}", name="Get specific item by ID or name from a category")
+@router.get("/{category}/{item_id_or_name}", name="Get specific item by ID or name from a category")
 @cache(expire=3600)
 async def get_category_item_by_id(
     category: str = Path(..., description="Category name (e.g., buildings, troops, heroes)"),
-    item_id: str = Path(..., description="Item ID (integer) or name (string)")
+    item_id_or_name: str = Path(..., description="Item ID (integer) or name (string)")
 ):
     """
     Get a specific item by its ID or name from a category.
@@ -284,38 +284,7 @@ async def get_category_item_by_id(
         GET /v2/static/heroes/28000000
         GET /v2/static/troops/4000000
     """
-    # Validate category
-    if category not in CATEGORIES:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Category '{category}' not found. Available categories: {', '.join(CATEGORIES.keys())}"
-        )
-
-    items = STATIC_DATA.get(category, [])
-    category_meta = CATEGORIES[category]
-    id_field = category_meta["id_field"]
-
-    # Try to parse as integer first (ID lookup)
-    try:
-        item_id_int = int(item_id)
-        item = next((i for i in items if i.get(id_field) == item_id_int), None)
-        if item:
-            return item
-    except ValueError:
-        # Not an integer, treat as name
-        pass
-
-    # If we reach here, either parsing as int failed or item not found by ID
-    # Try to find by name (case-insensitive)
-    item = next((i for i in items if i.get("name", "").lower() == item_id.lower()), None)
-
-    if not item:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Item with ID or name '{item_id}' not found in category '{category}'"
-        )
-
-    return item
+    return find_item_by_id_or_name(category, item_id_or_name)
 
 
 def find_item_by_id_or_name(category: str, item_id: str) -> dict:
@@ -366,11 +335,11 @@ def find_item_by_id_or_name(category: str, item_id: str) -> dict:
     return item
 
 
-@router.get("/{category}/{item_id}/maxlevel", name="Get maximum level of an item")
+@router.get("/{category}/{item_id_or_name}/maxlevel", name="Get maximum level of an item")
 @cache(expire=3600)
 async def get_item_max_level(
     category: str = Path(..., description="Category name (e.g., buildings, troops, heroes)"),
-    item_id: str = Path(..., description="Item ID (integer) or name (string)")
+    item_id_or_name: str = Path(..., description="Item ID (integer) or name (string)")
 ):
     """
     Get the maximum level of a specific item from a category.
@@ -401,14 +370,14 @@ async def get_item_max_level(
         )
 
     # Find the item
-    item = find_item_by_id_or_name(category, item_id)
+    item = find_item_by_id_or_name(category, item_id_or_name)
 
     # Extract levels
     levels = item.get("levels", [])
     if not levels:
         raise HTTPException(
             status_code=404,
-            detail=f"Item '{item.get('name', item_id)}' in category '{category}' has no levels defined"
+            detail=f"Item '{item.get('name', item_id_or_name)}' in category '{category}' has no levels defined"
         )
 
     # Extract level numbers from the levels array
@@ -425,7 +394,7 @@ async def get_item_max_level(
     if not level_numbers:
         raise HTTPException(
             status_code=404,
-            detail=f"Could not extract level numbers from item '{item.get('name', item_id)}' in category '{category}'"
+            detail=f"Could not extract level numbers from item '{item.get('name', item_id_or_name)}' in category '{category}'"
         )
 
     max_level = max(level_numbers)
