@@ -1,9 +1,15 @@
 import coc
+import hikari
+import logging
 import pendulum as pend
 from bson import ObjectId
 from coc.utils import correct_tag
 
+from utils.cache_decorator import cache_endpoint
+from utils.config import Config
 from utils.database import MongoClient
+
+logger = logging.getLogger(__name__)
 
 # Constants
 DATA_PREP_START_TIME = 'data.preparationStartTime'
@@ -204,13 +210,23 @@ async def calculate_bulk_stats(player_tags: list[str], mongo: MongoClient = None
 
 
 def extract_discord_user_id(discord_mention: str) -> str:
-    """Extract Discord user ID from mention string."""
-    if not discord_mention or discord_mention == NO_USER:
-        return NO_USER
+    """Extract Discord user ID from mention format or raw ID.
 
-    # Remove <@> and <@!> formatting to get just the ID
-    if discord_mention.startswith('<@'):
-        return discord_mention.strip('<@!>')
+    Args:
+        discord_mention: Discord mention like <@123456> or raw ID
+
+    Returns:
+        Extracted user ID as string, or empty string if invalid
+    """
+    if not discord_mention or discord_mention == NO_USER:
+        return ""
+
+    # Handle mention format <@123456> or <@!123456>
+    if discord_mention.startswith('<@') and discord_mention.endswith('>'):
+        user_id = discord_mention[2:-1]
+        if user_id.startswith('!'):
+            user_id = user_id[1:]
+        return user_id
 
     return discord_mention  # Already just an ID or custom format
 
@@ -236,7 +252,7 @@ async def check_user_account_limit(
         return True, 0, 0  # No limit set
 
     discord_user_id = extract_discord_user_id(discord_user)
-    if discord_user_id == NO_USER:
+    if not discord_user_id:
         return True, 0, max_accounts  # No Discord user, no limit
 
     # Count current accounts for this Discord user
@@ -805,3 +821,63 @@ async def refresh_single_roster(roster: dict, mongo, coc_client) -> dict:
         'updated': updated_count,
         'removed': removed_count,
     }
+
+
+@cache_endpoint(ttl=120, key_prefix="roster_server_members")
+async def get_server_members_with_cache(rest: hikari.RESTApp, server_id: int, bot_token: str) -> dict:
+    """Fetch all members for a Discord server with caching.
+
+    Args:
+        rest: Hikari REST client
+        server_id: Discord server ID
+        bot_token: Bot authentication token
+
+    Returns:
+        Dictionary mapping user_id (str) to member object with username and avatar
+    """
+    members_dict = {}
+    if not bot_token:
+        return members_dict
+
+    try:
+        async with rest.acquire(token=bot_token, token_type=hikari.TokenType.BOT) as client:
+            async for member in client.fetch_members(server_id):
+                user_id = str(member.user.id)
+                display_name = member.nickname or member.user.username
+                avatar_url = str(member.user.make_avatar_url()) if member.user.avatar_hash else None
+
+                members_dict[user_id] = {
+                    'username': display_name,
+                    'avatar_url': avatar_url
+                }
+    except Exception as e:
+        logger.warning(f"Error fetching server members for {server_id}: {e}")
+
+    return members_dict
+
+
+def enrich_members_with_discord_info(members: list, members_dict: dict) -> list:
+    """Enrich roster members with Discord username and avatar.
+
+    Args:
+        members: List of roster member dicts
+        members_dict: Dict mapping user_id to {username, avatar_url}
+
+    Returns:
+        Members list with discord_username and discord_avatar_url added
+    """
+    if not members:
+        return members
+
+    for member in members:
+        discord_value = member.get('discord', '')
+        user_id = extract_discord_user_id(discord_value)
+
+        if user_id and user_id in members_dict:
+            member['discord_username'] = members_dict[user_id].get('username')
+            member['discord_avatar_url'] = members_dict[user_id].get('avatar_url')
+        else:
+            member['discord_username'] = None
+            member['discord_avatar_url'] = None
+
+    return members
