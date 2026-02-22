@@ -1,4 +1,5 @@
 import aiohttp
+import hikari
 import linkd
 import logging
 import pendulum as pend
@@ -33,6 +34,8 @@ from routers.v2.rosters.utils import (refresh_member_data,
                                       refresh_single_roster)
 from utils.custom_coc import CustomClashClient
 from utils.database import MongoClient
+from utils.cache_decorator import cache_endpoint
+from utils.config import Config
 from utils.discord_api import get_discord_channels
 from utils.security import check_authentication
 from utils.sentry_utils import capture_endpoint_errors
@@ -51,6 +54,90 @@ ROSTER_SIGNUP_CATEGORY_NOT_FOUND = "Roster signup category not found"
 MEMBER_NOT_FOUND_IN_ROSTER = "Member not found in roster"
 AUTOMATION_RULE_NOT_FOUND = "Automation rule not found"
 NO_USER = "No User"
+
+
+@cache_endpoint(ttl=120, key_prefix="roster_server_members")
+async def get_server_members_with_cache(rest: hikari.RESTApp, server_id: int, bot_token: str) -> dict:
+    """Fetch all members for a Discord server with caching.
+
+    Args:
+        rest: Hikari REST client
+        server_id: Discord server ID
+        bot_token: Bot authentication token
+
+    Returns:
+        Dictionary mapping user_id (str) to member object with username and avatar
+    """
+    members_dict = {}
+    if not bot_token:
+        return members_dict
+
+    try:
+        async with rest.acquire(token=bot_token, token_type=hikari.TokenType.BOT) as client:
+            async for member in client.fetch_members(server_id):
+                user_id = str(member.user.id)
+                display_name = member.nickname or member.user.username
+                avatar_url = str(member.user.make_avatar_url()) if member.user.avatar_hash else None
+
+                members_dict[user_id] = {
+                    'username': display_name,
+                    'avatar_url': avatar_url
+                }
+    except Exception as e:
+        logger.warning(f"Error fetching server members for {server_id}: {e}")
+
+    return members_dict
+
+
+def extract_discord_user_id(discord_value: str) -> str:
+    """Extract Discord user ID from mention format or raw ID.
+
+    Args:
+        discord_value: Discord mention like <@123456> or raw ID
+
+    Returns:
+        Extracted user ID as string, or the original value
+    """
+    if not discord_value or discord_value == NO_USER:
+        return ""
+
+    # Handle mention format <@123456> or <@!123456>
+    if discord_value.startswith('<@') and discord_value.endswith('>'):
+        # Remove <@ or <@! prefix and > suffix
+        user_id = discord_value[2:-1]
+        if user_id.startswith('!'):
+            user_id = user_id[1:]
+        return user_id
+
+    # Already a raw ID or username
+    return discord_value
+
+
+def enrich_members_with_discord_info(members: list, members_dict: dict) -> list:
+    """Enrich roster members with Discord username and avatar.
+
+    Args:
+        members: List of roster member dicts
+        members_dict: Dict mapping user_id to {username, avatar_url}
+
+    Returns:
+        Members list with discord_username and discord_avatar_url added
+    """
+    if not members:
+        return members
+
+    for member in members:
+        discord_value = member.get('discord', '')
+        user_id = extract_discord_user_id(discord_value)
+
+        if user_id and user_id in members_dict:
+            member['discord_username'] = members_dict[user_id].get('username')
+            member['discord_avatar_url'] = members_dict[user_id].get('avatar_url')
+        else:
+            member['discord_username'] = None
+            member['discord_avatar_url'] = None
+
+    return members
 
 
 @router.post('/roster', name='Create a roster')
@@ -204,6 +291,8 @@ async def get_roster(
     _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
     mongo: MongoClient,
+    rest: hikari.RESTApp,
+    config: Config,
 ):
     """
     Retrieve a specific roster by its ID for display in the dashboard.
@@ -229,6 +318,11 @@ async def get_roster(
     # Map time field to event_start_time for frontend compatibility
     if doc.get('time'):
         doc['event_start_time'] = doc['time']
+
+    # Enrich members with Discord user info (username and avatar)
+    if doc.get('members'):
+        members_dict = await get_server_members_with_cache(rest, server_id, config.bot_token)
+        doc['members'] = enrich_members_with_discord_info(doc['members'], members_dict)
 
     return {'roster': doc}
 
@@ -659,6 +753,47 @@ async def create_roster_group(
     }
 
 
+@router.get('/roster-group/list', name='List Roster Groups')
+@linkd.ext.fastapi.inject
+@check_authentication
+@capture_endpoint_errors
+async def list_roster_groups(
+    server_id: int,
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
+    *,
+    mongo: MongoClient,
+):
+    """
+    Retrieve all roster groups for a Discord server with roster counts.
+
+    Input:
+        - server_id: Discord server ID to list groups for
+        - credentials: JWT authentication token
+
+    Output:
+        - List of groups sorted by most recently updated
+        - Each group includes count of associated rosters
+        - HTTP 401 if unauthorized
+
+    Note: Returns empty list if server has no roster groups
+    """
+    # Fetch all groups for the server, sorted by most recent activity
+    cursor = mongo.roster_groups.find(
+        {'server_id': server_id}, {'_id': 0}
+    ).sort('updated_at', -1)
+    groups = await cursor.to_list(length=None)
+
+    # Enrich each group with roster count for better overview
+    for group in groups:
+        # Count how many rosters are currently assigned to this group
+        roster_count = await mongo.rosters.count_documents(
+            {'group_id': group['group_id']}
+        )
+        group['roster_count'] = roster_count  # Add count to group data
+
+    return {'items': groups, 'server_id': server_id}
+
+
 @router.get('/roster-group/{group_id}', name='Get Roster Group')
 @linkd.ext.fastapi.inject
 @check_authentication
@@ -758,47 +893,6 @@ async def update_roster_group(
         raise HTTPException(status_code=404, detail=ROSTER_GROUP_NOT_FOUND)
 
     return {'message': 'Roster group updated', 'group': result}
-
-
-@router.get('/roster-group/list', name='List Roster Groups')
-@linkd.ext.fastapi.inject
-@check_authentication
-@capture_endpoint_errors
-async def list_roster_groups(
-    server_id: int,
-    _credentials: HTTPAuthorizationCredentials = Depends(security),
-    *,
-    mongo: MongoClient,
-):
-    """
-    Retrieve all roster groups for a Discord server with roster counts.
-
-    Input:
-        - server_id: Discord server ID to list groups for
-        - credentials: JWT authentication token
-
-    Output:
-        - List of groups sorted by most recently updated
-        - Each group includes count of associated rosters
-        - HTTP 401 if unauthorized
-
-    Note: Returns empty list if server has no roster groups
-    """
-    # Fetch all groups for the server, sorted by most recent activity
-    cursor = mongo.roster_groups.find(
-        {'server_id': server_id}, {'_id': 0}
-    ).sort('updated_at', -1)
-    groups = await cursor.to_list(length=None)
-
-    # Enrich each group with roster count for better overview
-    for group in groups:
-        # Count how many rosters are currently assigned to this group
-        roster_count = await mongo.rosters.count_documents(
-            {'group_id': group['group_id']}
-        )
-        group['roster_count'] = roster_count  # Add count to group data
-
-    return {'items': groups, 'server_id': server_id}
 
 
 @router.delete('/roster-group/{group_id}', name='Delete Roster Group')
