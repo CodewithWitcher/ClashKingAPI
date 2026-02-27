@@ -253,6 +253,28 @@ async def get_clan_stats(clan_tag: str):
     return remove_id_fields(api_response)
 
 
+@router.get("/clan/{clan_tag}/members", name="Get Clan Members")
+async def get_clan_members(clan_tag: str):
+    """Retrieve the member list for a specific clan."""
+    if not clan_tag:
+        raise HTTPException(status_code=400, detail="clan_tag is required")
+
+    fixed_tag = fix_tag(clan_tag)
+
+    async with aiohttp.ClientSession() as session:
+        url = f"https://proxy.clashk.ing/v1/clans/{fixed_tag.replace('#', '%23')}"
+        async with session.get(url) as response:
+            if response.status != 200:
+                raise HTTPException(status_code=404, detail="Clan not found")
+            clan_data = await response.json()
+
+    return {
+        'clan_tag': fixed_tag,
+        'clan_name': clan_data.get('name', ''),
+        'members': clan_data.get('memberList', []),
+    }
+
+
 @router.get("/clan/{clan_tag}/join-leave", name="Join Leaves in a season")
 async def clan_join_leave(
     clan_tag: str,

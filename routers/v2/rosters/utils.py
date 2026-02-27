@@ -703,6 +703,15 @@ async def analyze_roster_missing_members(roster: dict, coc_client) -> dict:
     """Analyze a single roster for missing members. Returns result dict with state."""
     registered_tags = {member['tag'] for member in roster.get('members', [])}
 
+    if not roster.get('clan_tag'):
+        return {
+            'state': 'error',
+            'error_message': 'No clan assigned to this roster',
+            'roster_info': build_roster_info_dict(roster, len(registered_tags)),
+            'missing_members': [],
+            'summary': {'total_missing': 0, 'total_clan_members': 0, 'coverage_percentage': 0},
+        }
+
     try:
         clan = await coc_client.get_clan(roster['clan_tag'])
         missing_members = []

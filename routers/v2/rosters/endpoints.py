@@ -112,6 +112,74 @@ async def create_roster(
 
 
 
+@router.get('/roster/missing-members', name='Get Missing Members')
+@linkd.ext.fastapi.inject
+@check_authentication
+@capture_endpoint_errors
+async def get_missing_members(
+    server_id: int,
+    roster_id: str = Query(
+        None, description='Get missing members for specific roster'
+    ),
+    group_id: str = Query(
+        None, description='Get missing members for all rosters in group'
+    ),
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
+    *,
+    mongo: MongoClient,
+    coc_client: CustomClashClient,
+):
+    """
+    Identify clan members who are not yet registered in roster(s) for recruitment analysis.
+
+    Input:
+        - server_id: Discord server ID for authorization
+        - roster_id: Check missing members for specific roster (optional)
+        - group_id: Check missing members for all rosters in group (optional)
+        - credentials: JWT authentication token
+
+    Output:
+        - Analysis results for each roster showing missing clan members
+        - Coverage percentage and recruitment opportunities
+        - Member details for easy roster addition
+        - HTTP 404 if no rosters found
+        - HTTP 400 if neither roster_id nor group_id provided
+        - HTTP 401 if unauthorized
+
+    Note: Helps identify recruitment gaps by comparing clan membership to roster registration
+    """
+
+    if not roster_id and not group_id:
+        raise HTTPException(
+            status_code=400, detail='Must provide roster_id or group_id'
+        )
+
+    # Build query filter and fetch rosters
+    query_filter = {'server_id': server_id}
+    if roster_id:
+        query_filter['custom_id'] = roster_id
+    elif group_id:
+        query_filter['group_id'] = group_id
+
+    rosters = await mongo.rosters.find(query_filter, {'_id': 0}).to_list(length=None)
+    if not rosters:
+        raise HTTPException(status_code=404, detail='No rosters found')
+
+    # Analyze each roster for missing members
+    results = []
+    for roster in rosters:
+        result = await analyze_roster_missing_members(roster, coc_client)
+        results.append(result)
+
+    return {
+        'query_type': 'roster' if roster_id else 'group',
+        'query_value': roster_id or group_id,
+        'server_id': server_id,
+        'results': results,
+        'total_rosters_checked': len(results),
+    }
+
+
 @router.patch('/roster/{roster_id}', name='Update a Roster')
 @linkd.ext.fastapi.inject
 @check_authentication
@@ -1278,6 +1346,68 @@ async def update_roster_member(
     return {'message': 'Member updated successfully'}
 
 
+@router.post('/roster/{roster_id}/members/{member_tag}/refresh', name='Refresh Individual Member')
+@linkd.ext.fastapi.inject
+@check_authentication
+@capture_endpoint_errors
+async def refresh_roster_member(
+    roster_id: str,
+    member_tag: str,
+    server_id: int = Query(..., description='Discord server ID for authorization'),
+    _credentials: HTTPAuthorizationCredentials = Depends(security),
+    *,
+    mongo: MongoClient,
+    coc_client: CustomClashClient,
+):
+    """
+    Refresh a single roster member's data from the Clash of Clans API.
+
+    Input:
+        - roster_id: Unique roster identifier
+        - member_tag: Clash of Clans player tag of the member to refresh
+        - server_id: Discord server ID for authorization
+        - credentials: JWT authentication token
+
+    Output:
+        - Updated member data
+        - HTTP 404 if roster or member not found
+        - HTTP 401 if unauthorized
+    """
+    # Validate roster exists and belongs to this server
+    roster = await mongo.rosters.find_one({
+        'custom_id': roster_id,
+        'server_id': server_id,
+        'members.tag': member_tag,
+    })
+    if not roster:
+        raise HTTPException(status_code=404, detail=MEMBER_NOT_FOUND_IN_ROSTER)
+
+    # Find the member in the roster
+    member = next((m for m in roster.get('members', []) if m['tag'] == member_tag), None)
+    if not member:
+        raise HTTPException(status_code=404, detail=MEMBER_NOT_FOUND_IN_ROSTER)
+
+    # Refresh member data from CoC API
+    updated_member, action = await refresh_member_data(member, coc_client, mongo)
+
+    if action == 'remove':
+        raise HTTPException(status_code=404, detail='Player no longer exists in the CoC API')
+
+    # Persist the updated member fields to MongoDB
+    await mongo.rosters.update_one(
+        {
+            'custom_id': roster_id,
+            'server_id': server_id,
+            'members.tag': member_tag,
+        },
+        {
+            '$set': {f'members.$.{k}': v for k, v in updated_member.items() if k != 'tag'}
+        }
+    )
+
+    return {'message': 'Member refreshed successfully', 'member': updated_member}
+
+
 # ======================== ROSTER AUTOMATION ENDPOINTS ========================
 
 
@@ -1480,74 +1610,6 @@ async def delete_roster_automation(
         )
 
     return {'message': 'Automation rule deleted'}
-
-
-@router.get('/roster/missing-members', name='Get Missing Members')
-@linkd.ext.fastapi.inject
-@check_authentication
-@capture_endpoint_errors
-async def get_missing_members(
-    server_id: int,
-    roster_id: str = Query(
-        None, description='Get missing members for specific roster'
-    ),
-    group_id: str = Query(
-        None, description='Get missing members for all rosters in group'
-    ),
-    _credentials: HTTPAuthorizationCredentials = Depends(security),
-    *,
-    mongo: MongoClient,
-    coc_client: CustomClashClient,
-):
-    """
-    Identify clan members who are not yet registered in roster(s) for recruitment analysis.
-
-    Input:
-        - server_id: Discord server ID for authorization
-        - roster_id: Check missing members for specific roster (optional)
-        - group_id: Check missing members for all rosters in group (optional)
-        - credentials: JWT authentication token
-
-    Output:
-        - Analysis results for each roster showing missing clan members
-        - Coverage percentage and recruitment opportunities
-        - Member details for easy roster addition
-        - HTTP 404 if no rosters found
-        - HTTP 400 if neither roster_id nor group_id provided
-        - HTTP 401 if unauthorized
-
-    Note: Helps identify recruitment gaps by comparing clan membership to roster registration
-    """
-
-    if not roster_id and not group_id:
-        raise HTTPException(
-            status_code=400, detail='Must provide roster_id or group_id'
-        )
-
-    # Build query filter and fetch rosters
-    query_filter = {'server_id': server_id}
-    if roster_id:
-        query_filter['custom_id'] = roster_id
-    elif group_id:
-        query_filter['group_id'] = group_id
-
-    rosters = await mongo.rosters.find(query_filter, {'_id': 0}).to_list(length=None)
-    if not rosters:
-        raise HTTPException(status_code=404, detail='No rosters found')
-
-    # Analyze each roster for missing members
-    results = []
-    for roster in rosters:
-        result = await analyze_roster_missing_members(roster, coc_client)
-        results.append(result)
-
-    return {
-        'query_type': 'roster' if roster_id else 'group',
-        'query_value': roster_id or group_id,
-        'server_id': server_id,
-        'results': results,
-        'total_rosters_checked': len(results),
-    }
 
 
 @router.get('/roster/server/{server_id}/members', name='Get Server Clan Members')
