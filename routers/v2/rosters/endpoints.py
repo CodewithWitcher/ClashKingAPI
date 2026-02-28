@@ -862,6 +862,10 @@ async def update_roster_group(
     if not body:
         return {'message': NOTHING_TO_UPDATE}
 
+    # Fields that cascade to all rosters in the group
+    ROSTER_RULE_FIELDS = {'roster_size', 'min_signups', 'allowed_signup_categories', 'max_accounts_per_user'}
+    roster_cascade = {k: v for k, v in body.items() if k in ROSTER_RULE_FIELDS}
+
     # Add timestamp to track when the update occurred
     body['updated_at'] = pend.now(tz=pend.UTC)
 
@@ -876,6 +880,14 @@ async def update_roster_group(
     # Check if group was found and updated
     if not result:
         raise HTTPException(status_code=404, detail=ROSTER_GROUP_NOT_FOUND)
+
+    # Propagate rule changes to all rosters in the group
+    if roster_cascade:
+        roster_cascade['updated_at'] = pend.now(tz=pend.UTC)
+        await mongo.rosters.update_many(
+            {'group_id': group_id},
+            {'$set': roster_cascade},
+        )
 
     return {'message': 'Roster group updated', 'group': result}
 
@@ -1504,7 +1516,7 @@ async def list_roster_automation(
 
     # Fetch automations sorted by scheduled execution time (earliest first)
     cursor = mongo.roster_automation.find(query, {'_id': 0}).sort(
-        {'scheduled_time': 1}
+        {'offset_seconds': 1}
     )
     automations = await cursor.to_list(length=None)
 

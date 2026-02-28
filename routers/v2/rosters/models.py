@@ -1,5 +1,5 @@
 from typing import List, Literal, Optional, Union
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Constants for field descriptions
 ROSTER_SIGNUP_CATEGORY_REF = 'Reference to roster_signup_categories.custom_id'
@@ -30,6 +30,11 @@ class RosterUpdateModel(BaseModel):
     signup_scope: Optional[Literal['clan-only', 'family-wide']] = None
     max_accounts_per_user: Optional[int] = None
     event_start_time: Optional[int] = None
+    recurrence_days: Optional[int] = Field(None, ge=1, description="Repeat event every N days. None = one-shot.")
+    recurrence_day_of_month: Optional[int] = Field(
+        None, ge=1, le=31,
+        description="Day of month to repeat (1–31). Mutually exclusive with recurrence_days."
+    )
 
     allowed_signup_categories: Optional[List[str]] = Field(
         None,
@@ -152,10 +157,10 @@ class UpdateRosterGroupModel(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     alias: Optional[str] = Field(None, max_length=64)
-    max_accounts_per_user: Optional[int] = None
-    auto_signup_publish: Optional[bool] = None
-    auto_registration_close: Optional[bool] = None
-    auto_result_publish: Optional[bool] = None
+    max_accounts_per_user: Optional[int] = Field(None, ge=1, description='Max accounts a single user can sign up across all rosters in this group')
+    roster_size: Optional[int] = Field(None, ge=1, description='Max members per roster in this group')
+    min_signups: Optional[int] = Field(None, ge=1, description='Minimum signups required for roster to be considered full (alert threshold)')
+    allowed_signup_categories: Optional[List[str]] = Field(None, description='Signup category IDs applied to all rosters in this group')
 
 
 # ======================== ROSTER PLACEMENTS ========================
@@ -194,18 +199,17 @@ class CreateRosterAutomationModel(BaseModel):
     )
 
     action_type: Literal[
-        'roster_signup',         # Post signup - open registrations
-        'roster_signup_close',   # Close signup - close registrations
-        'roster_post',           # Post final list - publish final roster
-        'roster_ping',           # Send reminders - ping unregistered/wrong clan
-        'recurring_event',       # Recurring event - auto-update roster dates
-        'roster_delete',         # Legacy - delete roster
-        'roster_clear',          # Legacy - clear roster
-        'roster_archive',        # Legacy - archive roster
+        'roster_signup',         # Open registrations
+        'roster_signup_close',   # Close registrations
+        'roster_post',           # Publish final roster
+        'roster_ping',           # Send reminders
+        'roster_delete',         # Delete roster
+        'roster_clear',          # Clear roster members
+        'roster_archive',        # Archive roster
     ] = Field(..., description='Type of automation action')
 
-    scheduled_time: int = Field(
-        ..., description='When to execute the action (timestamp)'
+    offset_seconds: int = Field(
+        ..., description='Offset in seconds relative to the roster event_start_time (negative = before event, positive = after)'
     )
     discord_channel_id: Optional[str] = Field(
         None, description='Discord channel for posting/pinging'
@@ -216,16 +220,50 @@ class CreateRosterAutomationModel(BaseModel):
         default={}, description='Action-specific configuration'
     )
 
+    @model_validator(mode='after')
+    def validate_ping_options(self):
+        if self.action_type == 'roster_ping':
+            ping_type = (self.options or {}).get('ping_type')
+            valid = {'signup_reminder', 'missing', 'sub_needed'}
+            if ping_type not in valid:
+                raise ValueError(
+                    f"options.ping_type must be one of {valid} when action_type is roster_ping"
+                )
+        return self
+
+
+VALID_PING_TYPES = Literal['signup_reminder', 'missing', 'sub_needed']
+
 
 class UpdateRosterAutomationModel(BaseModel):
     """Model for updating roster automation rules"""
 
     model_config = ConfigDict(extra='forbid')
 
-    scheduled_time: Optional[int] = None
+    action_type: Optional[Literal[
+        'roster_signup',
+        'roster_signup_close',
+        'roster_post',
+        'roster_ping',
+        'roster_delete',
+        'roster_clear',
+        'roster_archive',
+    ]] = None
+    offset_seconds: Optional[int] = None
     discord_channel_id: Optional[str] = None
     options: Optional[dict] = None
     active: Optional[bool] = None
+
+    @model_validator(mode='after')
+    def validate_ping_options(self):
+        if self.action_type == 'roster_ping':
+            ping_type = (self.options or {}).get('ping_type')
+            valid = {'signup_reminder', 'missing', 'sub_needed'}
+            if ping_type not in valid:
+                raise ValueError(
+                    f"options.ping_type must be one of {valid} when action_type is roster_ping"
+                )
+        return self
 
 
 # ======================== ENHANCED ROSTER MODELS ========================
