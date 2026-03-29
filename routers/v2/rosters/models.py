@@ -40,6 +40,10 @@ class RosterUpdateModel(BaseModel):
         None,
         description='List of roster_signup_categories.custom_id allowed for this roster',
     )
+    default_signup_category: Optional[str] = Field(
+        None,
+        description='Default roster_signup_categories.custom_id pre-selected when a member signs up. Must be in allowed_signup_categories if that list is non-empty.',
+    )
     group_id: Optional[str] = None  # Move roster to different group
 
     # Display and UI configuration
@@ -161,6 +165,7 @@ class UpdateRosterGroupModel(BaseModel):
     roster_size: Optional[int] = Field(None, ge=1, description='Max members per roster in this group')
     min_signups: Optional[int] = Field(None, ge=1, description='Minimum signups required for roster to be considered full (alert threshold)')
     allowed_signup_categories: Optional[List[str]] = Field(None, description='Signup category IDs applied to all rosters in this group')
+    default_signup_category: Optional[str] = Field(None, description='Default signup category pre-selected for all rosters in this group')
 
 
 # ======================== ROSTER PLACEMENTS ========================
@@ -209,7 +214,8 @@ class CreateRosterAutomationModel(BaseModel):
     ] = Field(..., description='Type of automation action')
 
     offset_seconds: int = Field(
-        ..., description='Offset in seconds relative to the roster event_start_time (negative = before event, positive = after)'
+        ..., le=0,
+        description='Offset in seconds relative to the roster event_start_time (must be ≤ 0 — at or before event start)'
     )
     discord_channel_id: Optional[str] = Field(
         None, description='Discord channel for posting/pinging'
@@ -249,7 +255,7 @@ class UpdateRosterAutomationModel(BaseModel):
         'roster_clear',
         'roster_archive',
     ]] = None
-    offset_seconds: Optional[int] = None
+    offset_seconds: Optional[int] = Field(None, le=0)
     discord_channel_id: Optional[str] = None
     options: Optional[dict] = None
     active: Optional[bool] = None

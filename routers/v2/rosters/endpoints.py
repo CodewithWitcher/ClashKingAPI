@@ -685,6 +685,9 @@ async def delete_roster_or_members(
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail=ROSTER_NOT_FOUND)
 
+        # Cascade: remove all automations targeting this roster
+        await mongo.roster_automation.delete_many({'roster_id': roster_id})
+
         return {'message': 'Roster deleted successfully'}
 
 
@@ -863,7 +866,7 @@ async def update_roster_group(
         return {'message': NOTHING_TO_UPDATE}
 
     # Fields that cascade to all rosters in the group
-    ROSTER_RULE_FIELDS = {'roster_size', 'min_signups', 'allowed_signup_categories', 'max_accounts_per_user'}
+    ROSTER_RULE_FIELDS = {'roster_size', 'min_signups', 'allowed_signup_categories', 'max_accounts_per_user', 'default_signup_category'}
     roster_cascade = {k: v for k, v in body.items() if k in ROSTER_RULE_FIELDS}
 
     # Add timestamp to track when the update occurred
@@ -897,7 +900,7 @@ async def update_roster_group(
 @check_authentication
 @capture_endpoint_errors
 async def delete_roster_group(
-    _server_id: int,
+    server_id: int,
     group_id: str,
     _credentials: HTTPAuthorizationCredentials = Depends(security),
     *,
@@ -935,6 +938,9 @@ async def delete_roster_group(
 
     # Delete the group document itself
     await mongo.roster_groups.delete_one({'group_id': group_id})
+
+    # Cascade: remove all group-level automations targeting this group
+    await mongo.roster_automation.delete_many({'group_id': group_id})
 
     return {
         'message': 'Roster group deleted successfully',
@@ -1470,6 +1476,8 @@ async def create_roster_automation(
     }
 
 
+
+
 @router.get('/roster-automation/list', name='List Roster Automation Rules')
 @linkd.ext.fastapi.inject
 @check_authentication
@@ -1512,7 +1520,6 @@ async def list_roster_automation(
     # Filter by execution status if requested
     if active_only:
         query['active'] = True      # Only enabled rules
-        query['executed'] = False   # Only unexecuted rules
 
     # Fetch automations sorted by scheduled execution time (earliest first)
     cursor = mongo.roster_automation.find(query, {'_id': 0}).sort(
