@@ -164,39 +164,50 @@ def build_duplicate_query(server_id: int, role_type: str, role_data) -> dict:
 
 
 async def create_status_role(mongo: MongoClient, server_id: int, server: dict, role_data, role_doc: dict) -> int:
-    """Handle creation/update of status roles."""
+    """Handle creation of status roles. Raises 409 on any duplicate."""
     existing_roles = server.get("status_roles", {}).get("discord", [])
-    if any(r.get("months") == role_data.months for r in existing_roles):
-        # Update existing
-        await mongo.server_db.update_one(
-            {"server": server_id, "status_roles.discord.months": role_data.months},
-            {"$set": {"status_roles.discord.$.id": role_data.id}}
-        )
-    else:
-        # Add new
-        await mongo.server_db.update_one(
-            {"server": server_id},
-            {"$addToSet": {"status_roles.discord": role_doc}}
-        )
+    existing = next((r for r in existing_roles if r.get("months") == role_data.months), None)
+
+    if existing:
+        if existing.get("id") == role_data.id:
+            raise HTTPException(
+                status_code=409,
+                detail="This criterion is already linked to this role."
+            )
+        else:
+            raise HTTPException(
+                status_code=409,
+                detail="This criterion already has a role assigned. Delete it first before adding a new one."
+            )
+
+    await mongo.server_db.update_one(
+        {"server": server_id},
+        {"$addToSet": {"status_roles.discord": role_doc}}
+    )
     return role_data.id
 
 
 async def create_standard_role(collection, query: dict, role_type: str, role_data, role_doc: dict) -> int:
-    """Handle creation/update of standard roles (non-status)."""
+    """Handle creation of standard roles (non-status). Raises 409 on any duplicate."""
     existing = await collection.find_one(query)
 
     if existing:
-        # Update existing role
-        if role_type == "achievement":
-            await collection.update_one(query, {"$set": {"id": role_data.id}})
-            return role_data.id
+        existing_role_id = existing.get("role") or existing.get("id")
+        new_role_id = getattr(role_data, "role", None) or getattr(role_data, "id", None)
+
+        if existing_role_id == new_role_id:
+            raise HTTPException(
+                status_code=409,
+                detail="This criterion is already linked to this role."
+            )
         else:
-            await collection.update_one(query, {"$set": {"role": role_data.role}})
-            return role_data.role
-    else:
-        # Insert new role
-        await collection.insert_one(role_doc)
-        return role_data.id if role_type == "achievement" else role_data.role
+            raise HTTPException(
+                status_code=409,
+                detail="This criterion already has a role assigned. Delete it first before adding a new one."
+            )
+
+    await collection.insert_one(role_doc)
+    return role_data.id if role_type == "achievement" else role_data.role
 
 
 async def fetch_roles_by_type(mongo: MongoClient, server_id: int, role_type: str, server: dict) -> list:
