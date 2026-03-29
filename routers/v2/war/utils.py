@@ -100,12 +100,39 @@ def _initialize_player_stats(player_stats, member):
         player_stats[member.tag]["townhall"] = member.town_hall
 
 def _process_member_attacks(member, player_stats, townhall_level, opponent_townhall_level):
-    """Process all attacks for a member."""
+    """Process attacks for a member, keeping only the best attack per defender village."""
+    best_per_defender: dict = {}
     for attack in member.attacks:
         if _should_skip_attack(member, attack, townhall_level, opponent_townhall_level):
             continue
+        prev = best_per_defender.get(attack.defender.tag)
+        if prev is None or attack.stars > prev.stars:
+            best_per_defender[attack.defender.tag] = attack
+
+    for attack in best_per_defender.values():
         spot = player_stats[attack.attacker.tag]["stats"]
         _update_attack_stats(spot, attack)
+
+def _process_opponent_attacks_on_clan(war, player_stats):
+    """Process opponent attacks to compute defensive stats for our clan members.
+
+    Uses the best (most stars) attack per opponent per defender to avoid counting
+    multiple cleanup attacks as separate defensive events.
+    """
+    clan_member_tags = {m.tag for m in war.clan.members}
+    for opponent_member in war.opponent.members:
+        best_per_defender: dict = {}
+        for attack in opponent_member.attacks:
+            if attack.defender.tag not in clan_member_tags:
+                continue
+            prev = best_per_defender.get(attack.defender.tag)
+            if prev is None or attack.stars > prev.stars:
+                best_per_defender[attack.defender.tag] = attack
+        for attack in best_per_defender.values():
+            defender_tag = attack.defender.tag
+            player_stats[defender_tag]["defense"]["defenses"] += 1
+            player_stats[defender_tag]["defense"]["stars_given"] += attack.stars
+
 
 def _record_missed_attacks(member, player_stats, war):
     """Record missed attacks for a member."""
@@ -160,12 +187,19 @@ def calculate_war_stats(
             _initialize_player_stats(player_stats, member)
             _process_member_attacks(member, player_stats, townhall_level, opponent_townhall_level)
             _record_missed_attacks(member, player_stats, war)
+        _process_opponent_attacks_on_clan(war, player_stats)
 
     for player, thvs in player_stats.items():
         for thv, stats in thvs.items():
-            if isinstance(stats, (str, int)) or thv == "missed":
+            if isinstance(stats, (str, int)) or thv in ("missed", "defense"):
                 continue
             _calculate_averages(stats)
+        defense = thvs.get("defense")
+        if defense:
+            defenses = int(defense.get("defenses", 0))
+            if defenses > 0:
+                defense["avg_stars_given"] = round(defense["stars_given"] / defenses, 2)
+            defense["defenses"] = defenses
 
     return {"items": list(player_stats.values())}
 

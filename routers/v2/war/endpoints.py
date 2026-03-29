@@ -391,7 +391,6 @@ async def clan_war_stats(
         ]
     }
 
-
     pipeline = [
         {MATCH_OPERATOR: query},
         {UNSET_OPERATOR: ["_id"]},
@@ -401,23 +400,21 @@ async def clan_war_stats(
     ]
 
     if war_types != 7:
-        war_types: list[int] = deconstruct_type(war_types)
+        war_types_list: list[int] = deconstruct_type(war_types)
         check = []
-        if 1 in war_types:
-            check.append({"type": "random"})
-
-        if 2 in war_types:
-            check.append({"type": "friendly"})
-
-        if 4 in war_types:
+        if 1 in war_types_list:
+            check.append({"data.type": "random"})
+        if 2 in war_types_list:
+            check.append({"data.type": "friendly"})
+        if 4 in war_types_list:
             check.append({"data.tag": {"$ne": None}})
-
-        pipeline.insert(1, {MATCH_OPERATOR: {"$or": check}})
+        if check:
+            pipeline.insert(1, {MATCH_OPERATOR: {"$or": check}})
 
     cursor = await mongo.clan_wars.aggregate(pipeline, allowDiskUse=True)
     wars = await cursor.to_list(length=None)
 
-    return await calculate_war_stats(
+    return calculate_war_stats(
         wars=wars, clan_tags=set(clan_tags),
         townhall_filter=townhall_filter
     )
