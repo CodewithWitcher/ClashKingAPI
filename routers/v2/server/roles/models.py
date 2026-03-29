@@ -20,7 +20,7 @@ RoleType = Literal[
 class TownhallRoleCreate(BaseModel):
     """Create a townhall role"""
     role: int = Field(..., description=DISCORD_ROLE_ID_DESC)
-    th: int = Field(..., description="Townhall level", ge=1, le=17)
+    th: int = Field(..., description="Townhall level", ge=1)
 
 
 class LeagueRoleCreate(BaseModel):
@@ -32,7 +32,7 @@ class LeagueRoleCreate(BaseModel):
 class BuilderHallRoleCreate(BaseModel):
     """Create a builder hall role"""
     role: int = Field(..., description=DISCORD_ROLE_ID_DESC)
-    bh: int = Field(..., description="Builder hall level", ge=1, le=10)
+    bh: int = Field(..., description="Builder hall level", ge=1)
 
 
 class BuilderLeagueRoleCreate(BaseModel):

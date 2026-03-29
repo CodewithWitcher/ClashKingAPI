@@ -23,6 +23,7 @@ from .models import (
     AllRolesResponse,
 )
 from typing import Union
+from pydantic import ValidationError
 import linkd
 import hikari
 import json
@@ -311,15 +312,6 @@ async def list_roles(
 async def create_role(
     server_id: int,
     role_type: RoleType,
-    role_data: Union[
-        TownhallRoleCreate,
-        LeagueRoleCreate,
-        BuilderHallRoleCreate,
-        BuilderLeagueRoleCreate,
-        AchievementRoleCreate,
-        StatusRoleCreate,
-        FamilyPositionRoleCreate,
-    ],
     _user_id: str = None,
     _request: Request = None,
     _credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -338,6 +330,18 @@ async def create_role(
     - status: {id, months}
     - family_position: {role, type}
     """
+    # Parse and validate body against the specific model for this role_type
+    model_class = ROLE_MODELS.get(role_type)
+    if not model_class:
+        raise HTTPException(status_code=400, detail=f"Invalid role type: {role_type}")
+
+    try:
+        body = await _request.json()
+        role_data = model_class.model_validate(body)
+    except ValidationError as e:
+        errors = [f"{' -> '.join(str(loc) for loc in err['loc'])}: {err['msg']}" for err in e.errors()]
+        raise HTTPException(status_code=422, detail=", ".join(errors))
+
     # Verify server exists
     server = await mongo.server_db.find_one({"server": server_id})
     if not server:
