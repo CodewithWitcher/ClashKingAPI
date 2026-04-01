@@ -6,6 +6,7 @@ config = Config()
 from redis import asyncio as redis
 
 from pymongo import AsyncMongoClient
+from pymongo.asynchronous.collection import AsyncCollection
 
 
 class MongoClient(AsyncMongoClient):
@@ -13,16 +14,20 @@ class MongoClient(AsyncMongoClient):
         super().__init__(host=uri, **kwargs)
 
         self.__clashking = self.get_database('clashking')
-        self.button_store = self.__clashking.get_collection('button_store')
-        self.coc_accounts = self.__clashking.get_collection('coc_accounts')
-        self.rosters = self.__clashking.get_collection('rosters')
+        self.button_store: AsyncCollection[dict] = self.__clashking.get_collection('button_store')
+        self.coc_accounts: AsyncCollection[dict] = self.__clashking.get_collection('coc_accounts')
+        self.rosters: AsyncCollection[dict] = self.__clashking.get_collection('rosters')
+
+        self.__looper = self.get_database('looper')
+        self.player_stats: AsyncCollection[dict] = self.__looper.get_collection('player_stats')
+
 
         self.__auth = self.get_database('auth')
-        self.auth_users = self.__auth.get_collection('users')
-        self.auth_discord_tokens = self.__auth.get_collection('discord_tokens')
-        self.auth_refresh_tokens = self.__auth.get_collection('refresh_tokens')
-        self.auth_email_verifications = self.__auth.get_collection('email_verifications')
-        self.auth_password_reset_tokens = self.__auth.get_collection('password_reset_tokens')
+        self.auth_users: AsyncCollection[dict] = self.__auth.get_collection('users')
+        self.auth_discord_tokens: AsyncCollection[dict] = self.__auth.get_collection('discord_tokens')
+        self.auth_refresh_tokens: AsyncCollection[dict] = self.__auth.get_collection('refresh_tokens')
+        self.auth_email_verifications: AsyncCollection[dict] = self.__auth.get_collection('email_verifications')
+        self.auth_password_reset_tokens: AsyncCollection[dict] = self.__auth.get_collection('password_reset_tokens')
 
 
 class OldMongoClient:

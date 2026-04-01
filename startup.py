@@ -7,6 +7,8 @@ from routers.v2.auth.auth import router as auth_router
 from routers.v2.rosters.rosters import router as rosters_router
 from routers.v2.dates.dates import router as dates_router
 from routers.v2.war.war import router as war_router
+from routers.v2.clan.clan import router as clan_router
+
 from fastapi.openapi.utils import get_openapi
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -14,12 +16,7 @@ from coc.errors import HTTPException
 
 def define_app(app: FastAPI):
 
-    #include_routers(app, os.path.join(os.path.dirname(__file__), "routers", "v2"), recursive=True)
-    app.include_router(rosters_router)
-    app.include_router(accounts_router)
-    app.include_router(auth_router)
-    app.include_router(dates_router)
-    app.include_router(war_router)
+    app.include_router(clan_router)
 
     description = textwrap.dedent("""
     ### Clash of Clans Based API 👑
@@ -58,19 +55,3 @@ def define_app(app: FastAPI):
             headers=headers
         )
 
-
-def include_routers(app, directory, recursive=False):
-    """Include routers from a given directory. If recursive is True, search for 'endpoints.py' in subdirectories."""
-    for root, _, files in os.walk(directory) if recursive else [(directory, [], os.listdir(directory))]:
-        for filename in files:
-            if filename == "endpoints.py" if recursive else filename.endswith(".py") and not filename.startswith("__"):
-                module_name = os.path.relpath(os.path.join(root, filename), start=directory).replace(os.sep, ".")[:-3]
-                file_path = os.path.join(root, filename)
-
-                spec = importlib.util.spec_from_file_location(module_name, file_path)
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-
-                router = getattr(module, "router", None)
-                if router:
-                    app.include_router(router)

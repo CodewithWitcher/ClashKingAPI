@@ -98,7 +98,7 @@ def gen_season_date(num_seasons: int = 0, as_text: bool = False) -> str | list[s
     def format_date(date: pend.DateTime, text_format: bool) -> str:
         return f'{calendar.month_name[date.month]} {date.year}' if text_format else date.format('YYYY-MM')
 
-    end_date = pend.instance(coc.utils.get_season_end().replace(tzinfo=pend.UTC))
+    end_date = pend.instance(coc.utils.get_season_start())
 
     if num_seasons == 0:
         return format_date(end_date, as_text)

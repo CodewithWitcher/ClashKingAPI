@@ -7,7 +7,6 @@ requires-python = "==3.13.7"
 dependencies = [
     "aiocache",
     "bcrypt",
-    "coc-py @ git+https://github.com/mathsman5133/coc.py.git@march-update",
     "cryptography",
     "expiring-dict",
     "fastapi",
@@ -32,6 +31,7 @@ dependencies = [
     "slowapi",
     "uvloop",
     "uvicorn",
+    "clashy-py",
 ]
 
 [project.optional-dependencies]
